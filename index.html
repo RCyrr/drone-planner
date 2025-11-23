@@ -58,10 +58,13 @@ button{margin-top:.5rem; padding:.5rem 1rem;}
 <div id="stripOutput" class="output"></div>
 </div>
 <div id="map"></div>
+
+<!-- Bibliotheken -->
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/exifr/dist/lite.umd.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/turf/6.5.0/turf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@turf/turf/turf.min.js"></script>
+
 <script>
 const DRONE_DATABASE = {
 "DJI Mini 4 Pro":{pixelSize_um:1.22,focalLength_mm:24,sensorWidth_px:8064,sensorHeight_px:6048},
@@ -76,104 +79,147 @@ const DRONE_DATABASE = {
 "DJI Matrice 350 RTK":{pixelSize_um:3.76,focalLength_mm:35,sensorWidth_px:5472,sensorHeight_px:3648}
 };
 
-// Map initialisieren
-const map=L.map('map').setView([48.137,11.575],13);
+const map = L.map('map').setView([48.137,11.575],13);
 L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19}).addTo(map);
-const drawnItems=new L.FeatureGroup().addTo(map);
-const drawControl=new L.Control.Draw({draw:{polygon:{allowIntersection:false},polyline:false,rectangle:false,circle:false,marker:false,circlemarker:false},edit:{featureGroup:drawnItems}});
+const drawnItems = new L.FeatureGroup().addTo(map);
+map.addLayer(drawnItems);
+const drawControl = new L.Control.Draw({draw:{polygon:{allowIntersection:false},polyline:false,rectangle:false,circle:false,marker:false,circlemarker:false},edit:{featureGroup:drawnItems}});
 map.addControl(drawControl);
 let polygon=null;
 
+// LayerGroups für Streifen & Fotos
+const layerStrips = L.layerGroup().addTo(map);
+const layerPhotos = L.layerGroup().addTo(map);
+const overlays = { "Streifen": layerStrips, "Fotopunkte": layerPhotos };
+L.control.layers({}, overlays, { collapsed:false }).addTo(map);
+
 // Polygon Buttons
-document.getElementById('drawPolygonBtn').onclick=()=>{ if(!L.Draw){ alert('Leaflet Draw nicht geladen!'); return;} new L.Draw.Polygon(map, drawControl.options.draw.polygon).enable();};
-document.getElementById('clearPolygonBtn').onclick=()=>{ drawnItems.clearLayers(); polygon=null; clearStrips(); };
-map.on(L.Draw.Event.CREATED,function(e){ drawnItems.clearLayers(); polygon=e.layer; if(!(polygon instanceof L.Polygon)){ alert('Fehler: Kein Polygon erstellt!'); polygon=null; return;} drawnItems.addLayer(polygon); });
+document.getElementById('drawPolygonBtn').onclick = () => { new L.Draw.Polygon(map, drawControl.options.draw.polygon).enable(); };
+document.getElementById('clearPolygonBtn').onclick = () => { drawnItems.clearLayers(); polygon=null; clearStrips(); };
+map.on(L.Draw.Event.CREATED, function(e){
+  if(e.layer instanceof L.Polygon){
+    drawnItems.clearLayers();
+    polygon = e.layer;
+    drawnItems.addLayer(polygon);
+  } else {
+    polygon = null;
+  }
+});
 
 // EXIF / Drohnenwerte
-const imageInput=document.getElementById('imageInput');
-const exifBox=document.getElementById('exifOutput');
-const droneSelect=document.getElementById('droneSelect');
-const focalInput=document.getElementById('focalLength');
-const pixelInput=document.getElementById('pixelSize');
-function updatePixelDisplay(){ const drone=DRONE_DATABASE[droneSelect.value]; pixelInput.value=drone.pixelSize_um; }
+const imageInput = document.getElementById('imageInput');
+const exifBox = document.getElementById('exifOutput');
+const droneSelect = document.getElementById('droneSelect');
+const focalInput = document.getElementById('focalLength');
+const pixelInput = document.getElementById('pixelSize');
+function updatePixelDisplay(){ const drone = DRONE_DATABASE[droneSelect.value]; pixelInput.value = drone.pixelSize_um; }
 updatePixelDisplay();
-droneSelect.addEventListener('change',()=>{updatePixelDisplay(); updateHeight();});
-imageInput.addEventListener('change',async()=>{ const file=imageInput.files[0]; if(!file) return; const exif=await exifr.parse(file); exifBox.innerHTML=''; if(exif){ exifBox.innerHTML=`Lat: ${exif.latitude}, Lon: ${exif.longitude}<br>Width: ${exif.ExifImageWidth||'-'}, Height: ${exif.ExifImageHeight||'-'}, Focal: ${exif.FocalLength||'-'}mm`; if(exif.latitude&&exif.longitude)L.marker([exif.latitude,exif.longitude]).addTo(map).bindPopup('Bildposition').openPopup(); if(exif.FocalLength&&!focalInput.value) focalInput.value=exif.FocalLength; }});
+droneSelect.addEventListener('change',()=>{ updatePixelDisplay(); updateHeight(); });
+imageInput.addEventListener('change', async () => { const file = imageInput.files[0]; if(!file) return; const exif = await exifr.parse(file); exifBox.innerHTML=''; if(exif){ exifBox.innerHTML=`Lat: ${exif.latitude}, Lon: ${exif.longitude}<br>Width: ${exif.ExifImageWidth||'-'}, Height: ${exif.ExifImageHeight||'-'}, Focal: ${exif.FocalLength||'-'}mm`; if(exif.latitude&&exif.longitude)L.marker([exif.latitude,exif.longitude]).addTo(map).bindPopup('Bildposition').openPopup(); if(exif.FocalLength&&!focalInput.value) focalInput.value=exif.FocalLength; } });
 
-// GSD ↔ Höhe Berechnung
-const gsdInput=document.getElementById('gsd');
-const heightInput=document.getElementById('height');
-function updateHeight(){
-  const drone=DRONE_DATABASE[droneSelect.value];
-  const pixelSize_m=(parseFloat(pixelInput.value)||drone.pixelSize_um)*1e-6;
-  const focal_m=(parseFloat(focalInput.value)||drone.focalLength_mm)*1e-3;
-  const gsd_m=parseFloat(gsdInput.value)/100;
-  if(isNaN(gsd_m) || isNaN(focal_m) || isNaN(pixelSize_m)){ alert('Parameter ungültig!'); return; }
-  const H = gsd_m * focal_m / pixelSize_m;
-  heightInput.value=H.toFixed(2);
-}
-function updateGSD(){
-  const drone=DRONE_DATABASE[droneSelect.value];
-  const pixelSize_m=(parseFloat(pixelInput.value)||drone.pixelSize_um)*1e-6;
-  const focal_m=(parseFloat(focalInput.value)||drone.focalLength_mm)*1e-3;
-  const H=parseFloat(heightInput.value);
-  if(isNaN(H) || isNaN(focal_m) || isNaN(pixelSize_m)){ alert('Parameter ungültig!'); return; }
-  const gsd_cm = H * pixelSize_m / focal_m * 100;
-  gsdInput.value=gsd_cm.toFixed(2);
-}
-gsdInput.addEventListener('input',updateHeight);
-heightInput.addEventListener('input',updateGSD);
+// GSD ↔ Höhe
+const gsdInput = document.getElementById('gsd');
+const heightInput = document.getElementById('height');
+function updateHeight(){ const drone = DRONE_DATABASE[droneSelect.value]; const pixelSize_m=(parseFloat(pixelInput.value)||drone.pixelSize_um)*1e-6; const focal_m=(parseFloat(focalInput.value)||drone.focalLength_mm)*1e-3; const gsd_m=parseFloat(gsdInput.value)/100; if(isNaN(gsd_m)||isNaN(focal_m)||isNaN(pixelSize_m)) return; const H=gsd_m*focal_m/pixelSize_m; heightInput.value = H.toFixed(2); }
+function updateGSD(){ const drone = DRONE_DATABASE[droneSelect.value]; const pixelSize_m=(parseFloat(pixelInput.value)||drone.pixelSize_um)*1e-6; const focal_m=(parseFloat(focalInput.value)||drone.focalLength_mm)*1e-3; const H=parseFloat(heightInput.value); if(isNaN(H)||isNaN(focal_m)||isNaN(pixelSize_m)) return; const gsd_cm = H*pixelSize_m/focal_m*100; gsdInput.value = gsd_cm.toFixed(2); }
+gsdInput.addEventListener('input', updateHeight);
+heightInput.addEventListener('input', updateGSD);
 
 // Flugstreifen + Foto-Punkte
-const frontlapInput=document.getElementById('frontlap');
-const sidelapInput=document.getElementById('sidelap');
-const directionInput=document.getElementById('flightDirection');
-const calcBtn=document.getElementById('calcStrips');
-const stripOutput=document.getElementById('stripOutput');
-let stripLayers=[];
-function clearStrips(){stripLayers.forEach(l=>map.removeLayer(l)); stripLayers=[];}
+const frontlapInput = document.getElementById('frontlap');
+const sidelapInput = document.getElementById('sidelap');
+const directionInput = document.getElementById('flightDirection');
+const calcBtn = document.getElementById('calcStrips');
+const stripOutput = document.getElementById('stripOutput');
 
-calcBtn.onclick=()=>{
-  if(!polygon || !polygon.getBounds()){ alert('Bitte Polygon zeichnen!'); return; }
+function clearStrips(){ layerStrips.clearLayers(); layerPhotos.clearLayers(); }
+
+calcBtn.onclick = () => {
+  if(!polygon) return;
   clearStrips();
-  const drone=DRONE_DATABASE[droneSelect.value];
+  const drone = DRONE_DATABASE[droneSelect.value];
   const pixelSize_m=(parseFloat(pixelInput.value)||drone.pixelSize_um)*1e-6;
   const focal_m=(parseFloat(focalInput.value)||drone.focalLength_mm)*1e-3;
-  const imgW=drone.sensorWidth_px;
-  const imgH=drone.sensorHeight_px;
-  const H=parseFloat(heightInput.value);
-  const frontlap=parseFloat(frontlapInput.value)/100;
-  const sidelap=parseFloat(sidelapInput.value)/100;
-  const dir_deg=parseFloat(directionInput.value)%360;
+  const imgW = drone.sensorWidth_px;
+  const imgH = drone.sensorHeight_px;
+  const H = parseFloat(heightInput.value);
+  const frontlap = parseFloat(frontlapInput.value)/100;
+  const sidelap = parseFloat(sidelapInput.value)/100;
+  const dir = parseFloat(directionInput.value)%360;
 
-  if([pixelSize_m,focal_m,H,frontlap,sidelap,dir_deg].some(v=>isNaN(v))){ alert('Parameter ungültig!'); return; }
+  const sensorW_m = imgW*pixelSize_m;
+  const sensorH_m = imgH*pixelSize_m;
+  const footprintX = H*sensorW_m/focal_m; // image width on ground [m]
+  const footprintY = H*sensorH_m/focal_m; // image height on ground [m]
+  stripOutput.innerHTML = `Footprint: ${footprintX.toFixed(2)} m x ${footprintY.toFixed(2)} m`;
 
-  const sensorWidth_m = imgW*pixelSize_m;
-  const sensorHeight_m = imgH*pixelSize_m;
-  const footprintX = H*sensorWidth_m/focal_m;
-  const footprintY = H*sensorHeight_m/focal_m;
-  stripOutput.innerHTML=`Footprint: ${footprintX.toFixed(2)} m x ${footprintY.toFixed(2)} m`;
+  // prepare polygon (GeoJSON)
+  const poly = turf.polygon(polygon.toGeoJSON().geometry.coordinates);
+  const centroid = turf.centroid(poly);
+  const rotatedPoly = turf.transformRotate(poly, -dir, { pivot: centroid });
+  const bbox = turf.bbox(rotatedPoly); // [minX,minY,maxX,maxY] in lon/lat
 
-  const polyGeo = polygon.toGeoJSON();
-  const polyBBox = turf.bbox(polyGeo);
+  // spacing in meters
+  const stripSpacing = footprintX*(1-sidelap);
+  const photoSpacing = footprintY*(1-frontlap);
 
-  const alongDist = footprintY*(1-frontlap);
-  const acrossDist = footprintX*(1-sidelap);
-  const angleRad = dir_deg*Math.PI/180;
-  const cosA = Math.cos(angleRad), sinA = Math.sin(angleRad);
+  // convert spacing meters -> approx degrees at mid-latitude using turf.destination? We'll use turf.destination to move points correctly.
+  // We'll generate vertical lines in rotated space by stepping in meters using turf.destination on centroid.
 
-  // Bounding-Box Approximation für Streifen (vereinfachte Umsetzung)
-  const minX = polyBBox[0], minY = polyBBox[1], maxX = polyBBox[2], maxY = polyBBox[3];
-  let stripOffset = 0;
-  while(stripOffset <= (maxX - minX + diagonal)) {
-    const linePoints = [];
-    for(let y = minY; y <= maxY; y += alongDist/111111){
-      linePoints.push([y, minX + stripOffset]);
-    }
-    stripLayers.push(L.polyline(linePoints,{color:'green'}).addTo(map));
-    // Foto-Punkte entlang Linie
-    linePoints.forEach(p=>{if(turf.booleanPointInPolygon(turf.point([p[1],p[0]]), polyGeo)) stripLayers.push(L.circleMarker([p[0],p[1]],{radius:3,color:'red'}).addTo(map));});
-    stripOffset += acrossDist;
+  // compute number of strips by projecting bbox corners to distances along perpendicular
+  const minX = bbox[0], maxX = bbox[2];
+  // we'll step across from left to right in meters using turf.destination starting from a point on bbox center
+  const bboxCenter = [(bbox[0]+bbox[2])/2, (bbox[1]+bbox[3])/2];
+
+  // find leftmost point (minX, centerY) and rightmost
+  const leftPoint = turf.point([minX, bboxCenter[1]]);
+  const rightPoint = turf.point([maxX, bboxCenter[1]]);
+  const totalWidth_km = turf.distance(leftPoint, rightPoint, {units:'kilometers'});
+  const totalWidth_m = totalWidth_km*1000;
+  const numStrips = Math.ceil((totalWidth_m + stripSpacing*4) / stripSpacing);
+
+  // start point: move from leftPoint backwards by 2*stripSpacing to ensure coverage
+  const startPoint = turf.destination(leftPoint, ( -2*stripSpacing)/1000, 90, {units:'kilometers'}); // move east positive
+
+  for(let i=0;i<numStrips;i++){
+    // current offset point in rotated space
+    const offset_m = i*stripSpacing;
+    const offsetPoint = turf.destination(startPoint, offset_m/1000, 90, {units:'kilometers'});
+    // build a long line north-south through this x (in rotated space)
+    const top = turf.destination(offsetPoint, 20000/1000, 0, {units:'kilometers'}); // 20km north
+    const bottom = turf.destination(offsetPoint, 20000/1000, 180, {units:'kilometers'}); // 20km south
+    const line = turf.lineString([bottom.geometry.coordinates, top.geometry.coordinates]);
+
+    // split line by rotated polygon -> returns segments
+    const split = turf.lineSplit(line, rotatedPoly);
+    // iterate segments and keep those whose midpoint is inside rotatedPoly
+    split.features.forEach(seg=>{
+      const segMid = turf.midpoint(turf.point(seg.geometry.coordinates[0]), turf.point(seg.geometry.coordinates[seg.geometry.coordinates.length-1]));
+      if(turf.booleanPointInPolygon(segMid, rotatedPoly)){
+        // rotate segment back by +dir around centroid
+        const segBack = turf.transformRotate(seg, dir, { pivot: centroid });
+        // convert coords to Leaflet latlngs
+        const latlngs = segBack.geometry.coordinates.map(c=>[c[1], c[0]]);
+        const polyline = L.polyline(latlngs, {color:'green'}).addTo(layerStrips);
+
+        // generate photo points along seg at photoSpacing
+        const segLength_km = turf.length(seg, {units:'kilometers'});
+        const segLength_m = segLength_km*1000;
+        if(segLength_m < 1) return;
+        const stepCount = Math.floor(segLength_m / photoSpacing);
+        for(let s=0;s<=stepCount;s++){
+          const dist_km = (s * photoSpacing)/1000;
+          const ptOnSeg = turf.along(seg, dist_km, {units:'kilometers'});
+          // rotate back
+          const ptBack = turf.transformRotate(ptOnSeg, dir, { pivot: centroid });
+          const coords = ptBack.geometry.coordinates; // [lng,lat]
+          // ensure point is inside original polygon
+          if(turf.booleanPointInPolygon(ptBack, poly)){
+            L.circleMarker([coords[1], coords[0]], {radius:3, color:'red'}).addTo(layerPhotos);
+          }
+        }
+      }
+    });
   }
 };
 </script>
