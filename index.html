@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mini Drone Planner</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    body { font-family: sans-serif; margin: 0; padding: 0; }
+    #map { height: 60vh; }
+    #controls { padding: 1rem; }
+    .output { margin-top: 1rem; padding: .5rem; background: #f0f0f0; border-radius: 8px; }
+  </style>
+</head>
+<body>
+  <h2 style="padding:1rem;">Mini Drone Planner</h2>
+
+  <div id="controls">
+    <h3>1. JPG auswählen (EXIF & GPS)</h3>
+    <input type="file" id="imageInput" accept="image/jpeg" />
+    <div id="exifOutput" class="output"></div>
+
+    <h3>2. Flugroute planen</h3>
+    <p>Klicke mehrere Punkte auf der Karte, um eine Route zu erstellen.</p>
+    <button id="clearRoute">Route löschen</button>
+  </div>
+
+  <div id="map"></div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/exifr/dist/lite.umd.js"></script>
+
+  <script>
+    // --- Karte Setup ---
+    const map = L.map('map').setView([48.137, 11.575], 13);
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+    }).addTo(map);
+
+    let routePoints = [];
+    let routeLine = null;
+
+    map.on('click', (e) => {
+      routePoints.push([e.latlng.lat, e.latlng.lng]);
+      if (routeLine) map.removeLayer(routeLine);
+      routeLine = L.polyline(routePoints, { color: 'blue' }).addTo(map);
+    });
+
+    document.getElementById('clearRoute').onclick = () => {
+      routePoints = [];
+      if (routeLine) map.removeLayer(routeLine);
+    };
+
+    // --- EXIF auslesen ---
+    const input = document.getElementById('imageInput');
+    const exifBox = document.getElementById('exifOutput');
+
+    input.addEventListener('change', async () => {
+      const file = input.files[0];
+      if (!file) return;
+
+      const exif = await exifr.parse(file);
+      exifBox.innerHTML = '';
+
+      if (!exif) {
+        exifBox.innerHTML = 'Keine EXIF-Daten gefunden.';
+        return;
+      }
+
+      const { latitude, longitude } = exif;
+      exifBox.innerHTML = `<strong>EXIF GPS:</strong><br>Lat: ${latitude}<br>Lon: ${longitude}`;
+
+      if (latitude && longitude) {
+        L.marker([latitude, longitude]).addTo(map);
+        map.setView([latitude, longitude], 18);
+      }
+    });
+  </script>
+</body>
+</html>
