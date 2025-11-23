@@ -1,158 +1,138 @@
 <!DOCTYPE html>
 <html lang="de">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Drone Planner – GitHub Pages Optimiert</title>
-
-  <!-- Meta für Social Preview -->
-  <meta property="og:title" content="Drone Planner" />
-  <meta property="og:description" content="Mini Drone Planning Tool – EXIF, GPS, Routenplanung und Flugstreifen." />
-  <meta property="og:type" content="website" />
-
-  <!-- Leaflet CSS -->
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-
-  <!-- Layout Styling -->
-  <style>
-    body { margin: 0; font-family: sans-serif; display: flex; height: 100vh; }
-    #sidebar {
-      width: 300px;
-      background: #fafafa;
-      padding: 1rem;
-      overflow-y: auto;
-      border-right: 1px solid #ddd;
-    }
-    #map { flex-grow: 1; }
-    h3 { margin-top: 1.5rem; }
-    .output { background: #efefef; padding: .5rem; border-radius: 8px; margin-top: .5rem; }
-    label { display: block; margin-top: .5rem; }
-    input[type="number"] { width: 100%; padding: .3rem; margin-top: .2rem; }
-    button { margin-top: .5rem; padding: .5rem 1rem; }
-  </style>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Drone Planner – GitHub Pages Optimiert</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css" />
+<style>
+body { margin:0; font-family:sans-serif; display:flex; height:100vh; }
+#sidebar { width:320px; background:#fafafa; padding:1rem; overflow-y:auto; border-right:1px solid #ddd; }
+#map { flex-grow:1; }
+h3{margin-top:1rem;}
+.output{background:#efefef; padding:.5rem; border-radius:8px; margin-top:.5rem;}
+label{display:block; margin-top:.5rem;}
+input, select{width:100%; padding:.3rem; margin-top:.2rem;}
+button{margin-top:.5rem; padding:.5rem 1rem;}
+</style>
 </head>
 <body>
+<div id="sidebar">
+<h2>Drone Planner</h2>
+<h3>1. Bild / Drohne</h3>
+<input type="file" id="imageInput" accept="image/jpeg" />
+<label>Drohne:</label>
+<select id="droneSelect">
+<option value="DJI Mini 4 Pro">DJI Mini 4 Pro</option>
+<option value="DJI Air 3">DJI Air 3</option>
+<option value="DJI Mavic 3E">DJI Mavic 3E</option>
+<option value="DJI Mavic 3 Pro">DJI Mavic 3 Pro</option>
+<option value="DJI Mavic 3 Classic">DJI Mavic 3 Classic</option>
+<option value="DJI Mavic 3 Enterprise">DJI Mavic 3 Enterprise</option>
+<option value="DJI Mini 3 Pro">DJI Mini 3 Pro</option>
+<option value="DJI Mini 3 SE">DJI Mini 3 SE</option>
+<option value="DJI Matrice 300 RTK">DJI Matrice 300 RTK</option>
+<option value="DJI Matrice 350 RTK">DJI Matrice 350 RTK</option>
+</select>
+<label>Brennweite [mm]:</label>
+<input type="number" id="focalLength" placeholder="Auto / EXIF" />
+<label>Pixelgröße [µm]:</label>
+<input type="number" id="pixelSize" placeholder="Auto / Drohnen-Daten" />
+<div id="exifOutput" class="output"></div>
+<h3>2. Flugplanung</h3>
+<p>Polygon auf der Karte zeichnen.</p>
+<label>GSD [cm/pixel]:</label>
+<input type="number" id="gsd" value="2" min="0.1" step="0.1" />
+<label>Flughöhe [m]:</label>
+<input type="number" id="height" value="50" min="1" step="1" />
+<label>Längsüberlappung [%]:</label>
+<input type="number" id="frontlap" value="70" min="0" max="99" />
+<label>Querüberlappung [%]:</label>
+<input type="number" id="sidelap" value="60" min="0" max="99" />
+<button id="calcStrips">Flugstreifen berechnen</button>
+<div id="stripOutput" class="output"></div>
+</div>
+<div id="map"></div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/exifr/dist/lite.umd.js"></script>
+<script>
+const DRONE_DATABASE = { /* 10 Drohnen wie vorher */
+  "DJI Mini 4 Pro": { pixelSize_um: 1.22, focalLength_mm: 24, sensorWidth_px: 8064, sensorHeight_px: 6048 },
+  "DJI Air 3": { pixelSize_um: 2.4, focalLength_mm: 24, sensorWidth_px: 7000, sensorHeight_px: 5000 },
+  "DJI Mavic 3E": { pixelSize_um: 2.4, focalLength_mm: 35, sensorWidth_px: 8192, sensorHeight_px: 5460 },
+  "DJI Mavic 3 Pro": { pixelSize_um: 2.4, focalLength_mm: 28, sensorWidth_px: 8192, sensorHeight_px: 5460 },
+  "DJI Mavic 3 Classic": { pixelSize_um: 2.4, focalLength_mm: 24, sensorWidth_px: 8192, sensorHeight_px: 5460 },
+  "DJI Mavic 3 Enterprise": { pixelSize_um: 2.4, focalLength_mm: 35, sensorWidth_px: 8192, sensorHeight_px: 5460 },
+  "DJI Mini 3 Pro": { pixelSize_um: 1.55, focalLength_mm: 24, sensorWidth_px: 4000, sensorHeight_px: 3000 },
+  "DJI Mini 3 SE": { pixelSize_um: 1.55, focalLength_mm: 24, sensorWidth_px: 4000, sensorHeight_px: 3000 },
+  "DJI Matrice 300 RTK": { pixelSize_um: 3.76, focalLength_mm: 35, sensorWidth_px: 5472, sensorHeight_px: 3648 },
+  "DJI Matrice 350 RTK": { pixelSize_um: 3.76, focalLength_mm: 35, sensorWidth_px: 5472, sensorHeight_px: 3648 }
+};
 
-  <div id="sidebar">
-    <h2>Drone Planner</h2>
+const map = L.map('map').setView([48.137, 11.575], 13);
+L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19}).addTo(map);
+const drawnItems = new L.FeatureGroup().addTo(map);
+const drawControl = new L.Control.Draw({ draw:{polyline:false,rectangle:false,circle:false,marker:false,circlemarker:false,polygon:{allowIntersection:false}},edit:{featureGroup:drawnItems}});
+map.addControl(drawControl);
+let polygon=null;
+map.on(L.Draw.Event.CREATED,function(e){drawnItems.clearLayers();polygon=e.layer;drawnItems.addLayer(polygon);});
 
-    <h3>1. Bild laden (EXIF)</h3>
-    <input type="file" id="imageInput" accept="image/jpeg" />
-    <div id="exifOutput" class="output"></div>
+const imageInput=document.getElementById('imageInput');
+const exifBox=document.getElementById('exifOutput');
+const droneSelect=document.getElementById('droneSelect');
+const focalInput=document.getElementById('focalLength');
+const pixelInput=document.getElementById('pixelSize');
+imageInput.addEventListener('change',async()=>{const file=imageInput.files[0];if(!file)return;const exif=await exifr.parse(file);exifBox.innerHTML='';if(exif){exifBox.innerHTML=`Lat: ${exif.latitude}, Lon: ${exif.longitude}<br>Width: ${exif.ExifImageWidth||'-'}, Height: ${exif.ExifImageHeight||'-'}, Focal: ${exif.FocalLength||'-'}mm`;if(exif.latitude&&exif.longitude)L.marker([exif.latitude,exif.longitude]).addTo(map).bindPopup('Bildposition').openPopup();if(exif.FocalLength&&!focalInput.value)focalInput.value=exif.FocalLength;}});
 
-    <h3>2. Flugroute planen</h3>
-    <p>Klicke Punkte auf die Karte.</p>
-    <button id="clearRoute">Route löschen</button>
+const gsdInput=document.getElementById('gsd');
+const heightInput=document.getElementById('height');
+function updateHeight(){const drone=DRONE_DATABASE[droneSelect.value];const pixelSize=parseFloat(pixelInput.value)||drone.pixelSize_um;const focal=parseFloat(focalInput.value)||drone.focalLength_mm;const gsd_cm=parseFloat(gsdInput.value);const H=gsd_cm/100*focal/pixelSize*1e3;heightInput.value=H.toFixed(2);}
+function updateGSD(){const drone=DRONE_DATABASE[droneSelect.value];const pixelSize=parseFloat(pixelInput.value)||drone.pixelSize_um;const focal=parseFloat(focalInput.value)||drone.focalLength_mm;const H=parseFloat(heightInput.value);const gsd_cm=H*focal/(pixelSize*1e3)*100;gsdInput.value=gsd_cm.toFixed(2);}
+gsdInput.addEventListener('input',updateHeight);
+heightInput.addEventListener('input',updateGSD);
 
-    <h3>3. Überlappung</h3>
-    <label>
-      Längsüberlappung (%)
-      <input type="number" id="frontlap" value="70" min="0" max="99" />
-    </label>
-    <label>
-      Querüberlappung (%)
-      <input type="number" id="sidelap" value="60" min="0" max="99" />
-    </label>
-    <button id="calcStrips">Flugstreifen berechnen</button>
+const frontlapInput=document.getElementById('frontlap');
+const sidelapInput=document.getElementById('sidelap');
+const calcBtn=document.getElementById('calcStrips');
+const stripOutput=document.getElementById('stripOutput');
+let stripLayers=[];
+function clearStrips(){stripLayers.forEach(l=>map.removeLayer(l));stripLayers=[];}
 
-    <div id="stripOutput" class="output"></div>
-  </div>
+calcBtn.onclick=()=>{
+if(!polygon){alert('Polygon zeichnen!');return;}
+clearStrips();
+const drone=DRONE_DATABASE[droneSelect.value];
+const pixelSize=parseFloat(pixelInput.value)||drone.pixelSize_um;
+const focal=parseFloat(focalInput.value)||drone.focalLength_mm;
+const imgW=drone.sensorWidth_px;
+const imgH=drone.sensorHeight_px;
+const H=parseFloat(heightInput.value);
+const frontlap=parseFloat(frontlapInput.value)/100;
+const sidelap=parseFloat(sidelapInput.value)/100;
+const footprintX=H*focal/(pixelSize*1e3)*imgW/100;
+const footprintY=H*focal/(pixelSize*1e3)*imgH/100;
+stripOutput.innerHTML=`Footprint: ${footprintX.toFixed(2)}m x ${footprintY.toFixed(2)}m`;
 
-  <div id="map"></div>
-
-  <!-- Scripts -->
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js">    const DRONE_DATABASE = {
-      "DJI Mini 4 Pro": {
-        pixelSize_um: 1.22,
-        focalLength_mm: 24,
-        sensorWidth_px: 8064,
-        sensorHeight_px: 6048
-      },
-      "DJI Air 3": {
-        pixelSize_um: 2.4,
-        focalLength_mm: 24,
-        sensorWidth_px: 7000,
-        sensorHeight_px: 5000
-      }
-    };
-  </script>
-  <script src="https://cdn.jsdelivr.net/npm/exifr/dist/lite.umd.js"></script>
-
-  <script>
-    // --- Karte Setup ---
-    const map = L.map('map').setView([48.137, 11.575], 13);
-    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
-
-    let routePoints = [];
-    let routeLine = null;
-    let stripLines = [];
-
-    map.on('click', (e) => {
-      routePoints.push([e.latlng.lat, e.latlng.lng]);
-      if (routeLine) map.removeLayer(routeLine);
-      routeLine = L.polyline(routePoints, { color: 'blue' }).addTo(map);
-    });
-
-    document.getElementById('clearRoute').onclick = () => {
-      routePoints = [];
-      if (routeLine) map.removeLayer(routeLine);
-      stripLines.forEach(l => map.removeLayer(l));
-      stripLines = [];
-    };
-
-    // --- EXIF auslesen ---
-    const input = document.getElementById('imageInput');
-    const exifBox = document.getElementById('exifOutput');
-
-    input.addEventListener('change', async () => {
-      const file = input.files[0];
-      if (!file) return;
-      const exif = await exifr.parse(file);
-      exifBox.innerHTML = '';
-
-      if (!exif) {
-        exifBox.innerHTML = 'Keine EXIF-Daten gefunden.';
-        return;
-      }
-
-      const { latitude, longitude } = exif;
-      exifBox.innerHTML = `<strong>EXIF GPS:</strong><br>Lat: ${latitude}<br>Lon: ${longitude}`;
-
-      if (latitude && longitude) {
-        L.marker([latitude, longitude]).addTo(map);
-        map.setView([latitude, longitude], 18);
-      }
-    });
-
-    // --- Flugstreifen berechnen ---
-    function offsetPoint(lat, lng, dx) {
-      const R = 6378137;
-      const dLat = 0;
-      const dLng = dx / (R * Math.cos(lat * Math.PI/180));
-      return [lat, lng + dLng * 180/Math.PI];
-    }
-
-    document.getElementById('calcStrips').onclick = () => {
-      stripLines.forEach(l => map.removeLayer(l));
-      stripLines = [];
-
-      if (routePoints.length < 2) return;
-
-      const sidelap = parseFloat(document.getElementById('sidelap').value) / 100;
-
-      // Demo: fixe Streifen-Abstände 30 m * sidelap
-      const stripSpacing = 30 * (1 - sidelap);
-
-      const base = routePoints;
-      const leftStrip = base.map(p => offsetPoint(p[0], p[1], -stripSpacing));
-      const rightStrip = base.map(p => offsetPoint(p[0], p[1], stripSpacing));
-
-      stripLines.push(L.polyline(leftStrip, { color: 'green' }).addTo(map));
-      stripLines.push(L.polyline(rightStrip, { color: 'green' }).addTo(map));
-
-      document.getElementById('stripOutput').innerHTML = `Flugstreifen-Abstand: ${stripSpacing.toFixed(2)} m`;
-    };
-  </script>
-
+// Flugstreifen innerhalb Polygon
+const bounds=polygon.getBounds();
+const north=bounds.getNorth(), south=bounds.getSouth(), west=bounds.getWest(), east=bounds.getEast();
+let y=south;while(y<north){
+  const line=[[y,west],[y,east]];
+  const polyline=L.polyline(line,{color:'green'}).addTo(map);
+  stripLayers.push(polyline);
+  // Bildpunkte berechnen
+  const alongDist=footprintY*(1-frontlap)/111111;
+  const acrossDist=footprintX*(1-sidelap)/111111;
+  for(let i=0;i<=10;i++){ // Beispiel: 10 Bilder pro Linie
+    const lat=y+(i*alongDist);
+    const marker=L.circleMarker([lat,(west+east)/2],{radius:3,color:'red'}).addTo(map);
+    stripLayers.push(marker);
+  }
+  y+=acrossDist;
+}
+};
+</script>
 </body>
 </html>
