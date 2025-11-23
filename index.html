@@ -41,7 +41,9 @@ button{margin-top:.5rem; padding:.5rem 1rem;}
 <input type="number" id="pixelSize" placeholder="Auto / Drohnen-Daten" readonly />
 <div id="exifOutput" class="output"></div>
 <h3>2. Flugplanung</h3>
-<p>Polygon auf der Karte zeichnen (Klick auf das Polygon-Symbol im Karte-Tool).</p>
+<p>Polygon zeichnen:</p>
+<button id="drawPolygonBtn">Polygon zeichnen</button>
+<button id="clearPolygonBtn">Polygon löschen</button>
 <label>GSD [cm/pixel]:</label>
 <input type="number" id="gsd" value="2" min="0.1" step="0.1" />
 <label>Flughöhe [m]:</label>
@@ -74,11 +76,30 @@ const DRONE_DATABASE = {
 const map=L.map('map').setView([48.137,11.575],13);
 L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19}).addTo(map);
 const drawnItems=new L.FeatureGroup().addTo(map);
-const drawControl=new L.Control.Draw({draw:{polyline:false,rectangle:false,circle:false,marker:false,circlemarker:false,polygon:{allowIntersection:false}},edit:{featureGroup:drawnItems}});
+map.addLayer(drawnItems);
+const drawControl=new L.Control.Draw({draw:{polygon:{allowIntersection:false},polyline:false,rectangle:false,circle:false,marker:false,circlemarker:false},edit:{featureGroup:drawnItems}});
 map.addControl(drawControl);
 let polygon=null;
-map.on(L.Draw.Event.CREATED,function(e){drawnItems.clearLayers();polygon=e.layer;drawnItems.addLayer(polygon);});
 
+// Polygon Zeichnen Button
+const drawBtn=document.getElementById('drawPolygonBtn');
+drawBtn.onclick=()=>{
+  new L.Draw.Polygon(map, drawControl.options.draw.polygon).enable();
+};
+// Polygon löschen Button
+const clearBtn=document.getElementById('clearPolygonBtn');
+clearBtn.onclick=()=>{
+  drawnItems.clearLayers();
+  polygon=null;
+};
+
+map.on(L.Draw.Event.CREATED,function(e){
+  drawnItems.clearLayers(); // nur ein Polygon gleichzeitig
+  polygon=e.layer;
+  drawnItems.addLayer(polygon);
+});
+
+// EXIF / Drohnenwerte
 const imageInput=document.getElementById('imageInput');
 const exifBox=document.getElementById('exifOutput');
 const droneSelect=document.getElementById('droneSelect');
@@ -90,16 +111,13 @@ function updatePixelDisplay(){
 }
 updatePixelDisplay();
 droneSelect.addEventListener('change',()=>{updatePixelDisplay(); updateHeight();});
-
 imageInput.addEventListener('change',async()=>{
-const file=imageInput.files[0];
-if(!file)return;
-const exif=await exifr.parse(file);
-exifBox.innerHTML='';
+const file=imageInput.files[0];if(!file)return;
+const exif=await exifr.parse(file);exifBox.innerHTML='';
 if(exif){
-  exifBox.innerHTML=`Lat: ${exif.latitude}, Lon: ${exif.longitude}<br>Width: ${exif.ExifImageWidth||'-'}, Height: ${exif.ExifImageHeight||'-'}, Focal: ${exif.FocalLength||'-'}mm`;
-  if(exif.latitude&&exif.longitude)L.marker([exif.latitude,exif.longitude]).addTo(map).bindPopup('Bildposition').openPopup();
-  if(exif.FocalLength&&!focalInput.value) focalInput.value=exif.FocalLength;
+exifBox.innerHTML=`Lat: ${exif.latitude}, Lon: ${exif.longitude}<br>Width: ${exif.ExifImageWidth||'-'}, Height: ${exif.ExifImageHeight||'-'}, Focal: ${exif.FocalLength||'-'}mm`;
+if(exif.latitude&&exif.longitude)L.marker([exif.latitude,exif.longitude]).addTo(map).bindPopup('Bildposition').openPopup();
+if(exif.FocalLength&&!focalInput.value) focalInput.value=exif.FocalLength;
 }}
 );
 
@@ -110,13 +128,13 @@ function updateGSD(){const drone=DRONE_DATABASE[droneSelect.value];const pixelSi
 gsdInput.addEventListener('input',updateHeight);
 heightInput.addEventListener('input',updateGSD);
 
+// Flugstreifen und Bildpositionen
 const frontlapInput=document.getElementById('frontlap');
 const sidelapInput=document.getElementById('sidelap');
 const calcBtn=document.getElementById('calcStrips');
 const stripOutput=document.getElementById('stripOutput');
 let stripLayers=[];
 function clearStrips(){stripLayers.forEach(l=>map.removeLayer(l));stripLayers=[];}
-
 calcBtn.onclick=()=>{
 if(!polygon){alert('Polygon zeichnen!');return;}
 clearStrips();
@@ -131,16 +149,15 @@ const sidelap=parseFloat(sidelapInput.value)/100;
 const footprintX=H*focal/(pixelSize*1e3)*imgW/100;
 const footprintY=H*focal/(pixelSize*1e3)*imgH/100;
 stripOutput.innerHTML=`Footprint: ${footprintX.toFixed(2)}m x ${footprintY.toFixed(2)}m`;
-
 const bounds=polygon.getBounds();
 const north=bounds.getNorth(), south=bounds.getSouth(), west=bounds.getWest(), east=bounds.getEast();
 let y=south;
+const alongDist=footprintY*(1-frontlap)/111111;
+const acrossDist=footprintX*(1-sidelap)/111111;
 while(y<north){
   const line=[[y,west],[y,east]];
   const polyline=L.polyline(line,{color:'green'}).addTo(map);
   stripLayers.push(polyline);
-  const alongDist=footprintY*(1-frontlap)/111111;
-  const acrossDist=footprintX*(1-sidelap)/111111;
   let x=west;
   while(x<east){
     const marker=L.circleMarker([y,x],{radius:3,color:'red'}).addTo(map);
