@@ -15,6 +15,8 @@ h3{margin-top:1rem;}
 label{display:block; margin-top:.5rem;}
 input, select{width:100%; padding:.3rem; margin-top:.2rem;}
 button{margin-top:.5rem; padding:.5rem 1rem;}
+.small{font-size:.9rem; color:#666}
+.warning{color:#a00; font-weight:bold}
 </style>
 </head>
 <body>
@@ -24,22 +26,23 @@ button{margin-top:.5rem; padding:.5rem 1rem;}
 <input type="file" id="imageInput" accept="image/jpeg" />
 <label>Drohne:</label>
 <select id="droneSelect">
+<option value="" disabled selected>Drohne wählen...</option>
 <option value="DJI Mini 4 Pro">DJI Mini 4 Pro</option>
 <option value="DJI Air 3">DJI Air 3</option>
 <option value="DJI Mavic 3E">DJI Mavic 3E</option>
-<option value="DJI Mavic 3 Pro">DJI Mavic 3 Pro</option>
-<option value="DJI Mavic 3 Classic">DJI Mavic 3 Classic</option>
-<option value="DJI Mavic 3 Enterprise">DJI Mavic 3 Enterprise</option>
+<option value="DJI Mavic 4E">DJI Mavic 4E</option>
 <option value="DJI Mini 3 Pro">DJI Mini 3 Pro</option>
-<option value="DJI Mini 3 SE">DJI Mini 3 SE</option>
 <option value="DJI Matrice 300 RTK">DJI Matrice 300 RTK</option>
+<option value="DJI Phantom 4 RTK">DJI Phantom 4 RTK</option>
 <option value="DJI Matrice 350 RTK">DJI Matrice 350 RTK</option>
+<option value="custom">Custom Drone...</option>
 </select>
 <label>Brennweite [mm]:</label>
-<input type="number" id="focalLength" placeholder="Auto / EXIF" />
+<input type="number" id="focalLength" placeholder="Wird automatisch gesetzt" />
 <label>Pixelgröße [µm]:</label>
-<input type="number" id="pixelSize" placeholder="Auto / Drohnen-Daten" readonly />
+<input type="number" id="pixelSize" placeholder="Wird automatisch gesetzt" />
 <div id="exifOutput" class="output"></div>
+<div id="droneNote" class="small"></div>
 <h3>2. Flugplanung</h3>
 <p>Polygon zeichnen:</p>
 <button id="drawPolygonBtn">Polygon zeichnen</button>
@@ -54,7 +57,7 @@ button{margin-top:.5rem; padding:.5rem 1rem;}
 <input type="number" id="frontlap" value="70" min="0" max="99" />
 <label>Querüberlappung [%]:</label>
 <input type="number" id="sidelap" value="60" min="0" max="99" />
-<button id="calcStrips">Flugstreifen berechnen</button>
+<button id="calcStrips" disabled>Flugstreifen berechnen</button>
 <div id="stripOutput" class="output"></div>
 </div>
 <div id="map"></div>
@@ -66,17 +69,16 @@ button{margin-top:.5rem; padding:.5rem 1rem;}
 <script src="https://cdn.jsdelivr.net/npm/@turf/turf/turf.min.js"></script>
 
 <script>
+// Expanded drone database with EXIF model tags (modelTag)
 const DRONE_DATABASE = {
-"DJI Mini 4 Pro":{pixelSize_um:1.22,focalLength_mm:24,sensorWidth_px:8064,sensorHeight_px:6048},
-"DJI Air 3":{pixelSize_um:2.4,focalLength_mm:24,sensorWidth_px:7000,sensorHeight_px:5000},
-"DJI Mavic 3E":{pixelSize_um:2.4,focalLength_mm:35,sensorWidth_px:8192,sensorHeight_px:5460},
-"DJI Mavic 3 Pro":{pixelSize_um:2.4,focalLength_mm:28,sensorWidth_px:8192,sensorHeight_px:5460},
-"DJI Mavic 3 Classic":{pixelSize_um:2.4,focalLength_mm:24,sensorWidth_px:8192,sensorHeight_px:5460},
-"DJI Mavic 3 Enterprise":{pixelSize_um:2.4,focalLength_mm:35,sensorWidth_px:8192,sensorHeight_px:5460},
-"DJI Mini 3 Pro":{pixelSize_um:1.55,focalLength_mm:24,sensorWidth_px:4000,sensorHeight_px:3000},
-"DJI Mini 3 SE":{pixelSize_um:1.55,focalLength_mm:24,sensorWidth_px:4000,sensorHeight_px:3000},
-"DJI Matrice 300 RTK":{pixelSize_um:3.76,focalLength_mm:35,sensorWidth_px:5472,sensorHeight_px:3648},
-"DJI Matrice 350 RTK":{pixelSize_um:3.76,focalLength_mm:35,sensorWidth_px:5472,sensorHeight_px:3648}
+  "DJI Mini 4 Pro":{modelTag:'FC8482',pixelSize_um:2.4,focalLength_mm:6.7,sensorWidth_px:4032,sensorHeight_px:2268},
+  "DJI Air 3":{modelTag:'FC8282',pixelSize_um:2.4,focalLength_mm:6.7,sensorWidth_px:4032,sensorHeight_px:2268},
+  "DJI Mavic 3E":{modelTag:'M3E',pixelSize_um:3.3,focalLength_mm:12.3,sensorWidth_px:5280,sensorHeight_px:3956},
+  "DJI Mavic 4E":{modelTag:'M4E',pixelSize_um:3.3,focalLength_mm:12.3,sensorWidth_px:5280,sensorHeight_px:3956},
+  "DJI Mini 3 Pro":{modelTag:'FC3582',pixelSize_um:2.4,focalLength_mm:6.7,sensorWidth_px:4032,sensorHeight_px:3024},
+  "DJI Matrice 300 RTK":{modelTag:'M300',pixelSize_um:3.76,focalLength_mm:35,sensorWidth_px:5472,sensorHeight_px:3648},
+  "DJI Phantom 4 RTK":{modelTag:'FC6310R',pixelSize_um:2.4,focalLength_mm:8.8,sensorWidth_px:5472,sensorHeight_px:3648},
+  "DJI Matrice 350 RTK":{modelTag:'M350',pixelSize_um:3.76,focalLength_mm:35,sensorWidth_px:5472,sensorHeight_px:3648}
 };
 
 const map = L.map('map').setView([48.137,11.575],13);
@@ -93,9 +95,174 @@ const layerPhotos = L.layerGroup().addTo(map);
 const overlays = { "Streifen": layerStrips, "Fotopunkte": layerPhotos };
 L.control.layers({}, overlays, { collapsed:false }).addTo(map);
 
-// Polygon Buttons
-document.getElementById('drawPolygonBtn').onclick = () => { new L.Draw.Polygon(map, drawControl.options.draw.polygon).enable(); };
-document.getElementById('clearPolygonBtn').onclick = () => { drawnItems.clearLayers(); polygon=null; clearStrips(); };
+// UI-Elemente
+const drawBtn = document.getElementById('drawPolygonBtn');
+const clearBtn = document.getElementById('clearPolygonBtn');
+const imageInput = document.getElementById('imageInput');
+const exifBox = document.getElementById('exifOutput');
+const droneSelect = document.getElementById('droneSelect');
+const focalInput = document.getElementById('focalLength');
+const pixelInput = document.getElementById('pixelSize');
+const droneNote = document.getElementById('droneNote');
+const calcBtn = document.getElementById('calcStrips');
+const gsdInput = document.getElementById('gsd');
+const heightInput = document.getElementById('height');
+const frontlapInput = document.getElementById('frontlap');
+const sidelapInput = document.getElementById('sidelap');
+const directionInput = document.getElementById('flightDirection');
+const stripOutput = document.getElementById('stripOutput');
+
+// init state
+pixelInput.readOnly = true;
+focalInput.readOnly = false; // allow override even for DB entries
+calcBtn.disabled = true;
+
+function setDroneValues(name){
+  if(!name || name==='') return;
+  if(name==='custom'){
+    // allow manual entry
+    pixelInput.readOnly = false;
+    focalInput.readOnly = false;
+    pixelInput.value = '';
+    focalInput.value = '';
+    droneNote.innerText = 'Custom Drone: bitte Brennweite und Pixelgröße eingeben (Pixelgröße in µm)';
+    return;
+  }
+  const d = DRONE_DATABASE[name];
+  if(d){
+    pixelInput.value = d.pixelSize_um;
+    pixelInput.readOnly = true;
+    focalInput.value = d.focalLength_mm;
+    focalInput.readOnly = false; // user still allowed to override
+    droneNote.innerText = `Aus Drohnendatenbank geladen: modelTag=${d.modelTag}`;
+  }
+}
+
+// check readiness to enable calc button
+function checkReady(){
+  const droneName = droneSelect.value;
+  if(!droneName) { calcBtn.disabled=true; return; }
+  // require focal and pixel
+  const focal = parseFloat(focalInput.value);
+  const pixel = parseFloat(pixelInput.value);
+  const gsd = parseFloat(gsdInput.value);
+  const H = parseFloat(heightInput.value);
+  const hasGsdOrH = (!isNaN(gsd) && gsd>0) || (!isNaN(H) && H>0);
+  const hasFocal = !isNaN(focal) && focal>0;
+  const hasPixel = !isNaN(pixel) && pixel>0;
+  const hasPoly = polygon instanceof L.Polygon;
+  if(hasFocal && hasPixel && hasGsdOrH && hasPoly){ calcBtn.disabled=false; } else { calcBtn.disabled=true; }
+}
+
+// event hookup
+droneSelect.addEventListener('change', ()=>{
+  setDroneValues(droneSelect.value);
+  checkReady();
+});
+
+// EXIF handling with user choice popup (Method B)
+imageInput.addEventListener('change', async ()=>{
+  const file = imageInput.files[0]; if(!file) return;
+  const exif = await exifr.parse(file);
+  exifBox.innerHTML = '';
+  if(!exif){ exifBox.innerText = 'Keine EXIF-Daten gefunden.'; return; }
+
+  const exifModel = exif.Model || exif.Make || null; // try Model first then Make
+  const exifFocal = exif.FocalLength || exif.FocalLengthIn35mmFormat || null;
+  const exifW = exif.ExifImageWidth || exif.PixelXDimension || null;
+  const exifH = exif.ExifImageHeight || exif.PixelYDimension || null;
+
+  exifBox.innerHTML = `EXIF: Model=${exifModel||'-'}, Focal=${exifFocal||'-'}mm, Size=${exifW||'-'}x${exifH||'-'}`;
+
+  // try match drone by modelTag
+  let matchedName = null;
+  for(const name in DRONE_DATABASE){ const d=DRONE_DATABASE[name]; if(d.modelTag && exifModel && exifModel.toString().includes(d.modelTag)){ matchedName = name; break; } }
+
+  // if matched and a drone is selected and matches, offer choice
+  if(matchedName){
+    // if selected drone matches matchedName, compare
+    if(droneSelect.value && droneSelect.value!=='' && droneSelect.value!== 'custom'){
+      const selected = droneSelect.value;
+      if(selected===matchedName && exifFocal){
+        // compare
+        const dbF = DRONE_DATABASE[selected].focalLength_mm;
+        const diff = Math.abs(exifFocal - dbF)/dbF;
+        let msg = `EXIF Brennweite ${exifFocal}mm gefunden für Model ${exifModel}.
+Datenbank: ${dbF}mm.`;
+        if(diff>0.1) msg += "\n\nAbweichung >10% — möchtest du EXIF-Wert verwenden? OK = EXIF, Abbrechen = Drohnendatenbank";
+        else msg += "\n\nOK = EXIF, Abbrechen = Drohnendatenbank";
+        const useExif = window.confirm(msg);
+        if(useExif){ focalInput.value = exifFocal; }
+        else { focalInput.value = dbF; }
+      }
+    } else {
+      // if no selected drone, pre-select matchedName to help user
+      droneSelect.value = matchedName;
+      setDroneValues(matchedName);
+      // if exif focal exists, ask user which to use
+      if(exifFocal){
+        const dbF = DRONE_DATABASE[matchedName].focalLength_mm;
+        const diff = Math.abs(exifFocal - dbF)/dbF;
+        let msg = `EXIF Brennweite ${exifFocal}mm gefunden für Model ${exifModel}.
+Datenbank: ${dbF}mm.`;
+        if(diff>0.1) msg += "\n\nAbweichung >10% — möchtest du EXIF-Wert verwenden? OK = EXIF, Abbrechen = Drohnendatenbank";
+        else msg += "\n\nOK = EXIF, Abbrechen = Drohnendatenbank";
+        const useExif = window.confirm(msg);
+        if(useExif){ focalInput.value = exifFocal; }
+      }
+    }
+  } else {
+    // not matched: if user wants to use EXIF focal for custom or unknown, ask
+    if(exifFocal){
+      const useExif = window.confirm(`EXIF Brennweite ${exifFocal}mm gefunden (Model=${exifModel}). OK = Verwenden, Abbrechen = nicht übernehmen`);
+      if(useExif){ focalInput.value = exifFocal; }
+    }
+    // if image size present and drone is custom, populate sensor pixels
+    if(exifW && exifH && droneSelect.value==='custom'){
+      // set sensor px as EXIF image size if user chooses
+      pixelInput.value = pixelInput.value || '';
+      // if empty, set sensor sizes implicitly by using image size for sensor px? We assume sensor px = image px for custom workflow
+      if(!pixelInput.value) pixelInput.value = '';
+      exifBox.innerHTML += '<br>Hinweis: Bildgröße in EXIF erkannt — falls Sensordaten fehlen, bitte Pixelgröße manuell eingeben.';
+    }
+  }
+  checkReady();
+});
+
+// set defaults when user selects drone
+setDroneValues(droneSelect.value);
+
+// GSD <-> Height coupling
+gsdInput.addEventListener('input', ()=>{
+  const pixelSize_m = (parseFloat(pixelInput.value) || 0)*1e-6;
+  const focal_m = (parseFloat(focalInput.value) || 0)*1e-3;
+  const gsd_cm = parseFloat(gsdInput.value);
+  if(!pixelSize_m || !focal_m || isNaN(gsd_cm)) return;
+  const gsd_m = gsd_cm/100;
+  const H = gsd_m * focal_m / pixelSize_m;
+  if(!isNaN(H)) heightInput.value = H.toFixed(2);
+  checkReady();
+});
+heightInput.addEventListener('input', ()=>{
+  const pixelSize_m = (parseFloat(pixelInput.value) || 0)*1e-6;
+  const focal_m = (parseFloat(focalInput.value) || 0)*1e-3;
+  const H = parseFloat(heightInput.value);
+  if(!pixelSize_m || !focal_m || isNaN(H)) return;
+  const gsd_cm = H * pixelSize_m / focal_m * 100;
+  if(!isNaN(gsd_cm)) gsdInput.value = gsd_cm.toFixed(2);
+  checkReady();
+});
+
+// when focal or pixel manually edited, re-check readiness
+focalInput.addEventListener('input', checkReady);
+pixelInput.addEventListener('input', checkReady);
+frontlapInput.addEventListener('input', checkReady);
+sidelapInput.addEventListener('input', checkReady);
+directionInput.addEventListener('input', checkReady);
+
+// Polygon drawing
+drawBtn.onclick = ()=>{ new L.Draw.Polygon(map, drawControl.options.draw.polygon).enable(); };
+clearBtn.onclick = ()=>{ drawnItems.clearLayers(); polygon=null; clearStrips(); checkReady(); };
 map.on(L.Draw.Event.CREATED, function(e){
   if(e.layer instanceof L.Polygon){
     drawnItems.clearLayers();
@@ -104,44 +271,21 @@ map.on(L.Draw.Event.CREATED, function(e){
   } else {
     polygon = null;
   }
+  checkReady();
 });
 
-// EXIF / Drohnenwerte
-const imageInput = document.getElementById('imageInput');
-const exifBox = document.getElementById('exifOutput');
-const droneSelect = document.getElementById('droneSelect');
-const focalInput = document.getElementById('focalLength');
-const pixelInput = document.getElementById('pixelSize');
-function updatePixelDisplay(){ const drone = DRONE_DATABASE[droneSelect.value]; pixelInput.value = drone.pixelSize_um; }
-updatePixelDisplay();
-droneSelect.addEventListener('change',()=>{ updatePixelDisplay(); updateHeight(); });
-imageInput.addEventListener('change', async () => { const file = imageInput.files[0]; if(!file) return; const exif = await exifr.parse(file); exifBox.innerHTML=''; if(exif){ exifBox.innerHTML=`Lat: ${exif.latitude}, Lon: ${exif.longitude}<br>Width: ${exif.ExifImageWidth||'-'}, Height: ${exif.ExifImageHeight||'-'}, Focal: ${exif.FocalLength||'-'}mm`; if(exif.latitude&&exif.longitude)L.marker([exif.latitude,exif.longitude]).addTo(map).bindPopup('Bildposition').openPopup(); if(exif.FocalLength&&!focalInput.value) focalInput.value=exif.FocalLength; } });
-
-// GSD ↔ Höhe
-const gsdInput = document.getElementById('gsd');
-const heightInput = document.getElementById('height');
-function updateHeight(){ const drone = DRONE_DATABASE[droneSelect.value]; const pixelSize_m=(parseFloat(pixelInput.value)||drone.pixelSize_um)*1e-6; const focal_m=(parseFloat(focalInput.value)||drone.focalLength_mm)*1e-3; const gsd_m=parseFloat(gsdInput.value)/100; if(isNaN(gsd_m)||isNaN(focal_m)||isNaN(pixelSize_m)) return; const H=gsd_m*focal_m/pixelSize_m; heightInput.value = H.toFixed(2); }
-function updateGSD(){ const drone = DRONE_DATABASE[droneSelect.value]; const pixelSize_m=(parseFloat(pixelInput.value)||drone.pixelSize_um)*1e-6; const focal_m=(parseFloat(focalInput.value)||drone.focalLength_mm)*1e-3; const H=parseFloat(heightInput.value); if(isNaN(H)||isNaN(focal_m)||isNaN(pixelSize_m)) return; const gsd_cm = H*pixelSize_m/focal_m*100; gsdInput.value = gsd_cm.toFixed(2); }
-gsdInput.addEventListener('input', updateHeight);
-heightInput.addEventListener('input', updateGSD);
-
-// Flugstreifen + Foto-Punkte
-const frontlapInput = document.getElementById('frontlap');
-const sidelapInput = document.getElementById('sidelap');
-const directionInput = document.getElementById('flightDirection');
-const calcBtn = document.getElementById('calcStrips');
-const stripOutput = document.getElementById('stripOutput');
-
+// Flugstreifen + Foto-Punkte (wie zuvor, unchanged)
 function clearStrips(){ layerStrips.clearLayers(); layerPhotos.clearLayers(); }
 
 calcBtn.onclick = () => {
   if(!polygon) return;
   clearStrips();
-  const drone = DRONE_DATABASE[droneSelect.value];
-  const pixelSize_m=(parseFloat(pixelInput.value)||drone.pixelSize_um)*1e-6;
-  const focal_m=(parseFloat(focalInput.value)||drone.focalLength_mm)*1e-3;
-  const imgW = drone.sensorWidth_px;
-  const imgH = drone.sensorHeight_px;
+  const droneName = droneSelect.value;
+  const drone = DRONE_DATABASE[droneName];
+  const pixelSize_m=(parseFloat(pixelInput.value)|| (drone?drone.pixelSize_um:0))*1e-6;
+  const focal_m=(parseFloat(focalInput.value)|| (drone?drone.focalLength_mm:0))*1e-3;
+  const imgW = drone?drone.sensorWidth_px: (parseInt(exifBox.dataset.imgw)||0);
+  const imgH = drone?drone.sensorHeight_px: (parseInt(exifBox.dataset.imgh)||0);
   const H = parseFloat(heightInput.value);
   const frontlap = parseFloat(frontlapInput.value)/100;
   const sidelap = parseFloat(sidelapInput.value)/100;
@@ -163,46 +307,30 @@ calcBtn.onclick = () => {
   const stripSpacing = footprintX*(1-sidelap);
   const photoSpacing = footprintY*(1-frontlap);
 
-  // convert spacing meters -> approx degrees at mid-latitude using turf.destination? We'll use turf.destination to move points correctly.
-  // We'll generate vertical lines in rotated space by stepping in meters using turf.destination on centroid.
-
-  // compute number of strips by projecting bbox corners to distances along perpendicular
   const minX = bbox[0], maxX = bbox[2];
-  // we'll step across from left to right in meters using turf.destination starting from a point on bbox center
   const bboxCenter = [(bbox[0]+bbox[2])/2, (bbox[1]+bbox[3])/2];
-
-  // find leftmost point (minX, centerY) and rightmost
   const leftPoint = turf.point([minX, bboxCenter[1]]);
   const rightPoint = turf.point([maxX, bboxCenter[1]]);
   const totalWidth_km = turf.distance(leftPoint, rightPoint, {units:'kilometers'});
   const totalWidth_m = totalWidth_km*1000;
   const numStrips = Math.ceil((totalWidth_m + stripSpacing*4) / stripSpacing);
-
-  // start point: move from leftPoint backwards by 2*stripSpacing to ensure coverage
-  const startPoint = turf.destination(leftPoint, ( -2*stripSpacing)/1000, 90, {units:'kilometers'}); // move east positive
+  const startPoint = turf.destination(leftPoint, (-2*stripSpacing)/1000, 90, {units:'kilometers'});
 
   for(let i=0;i<numStrips;i++){
-    // current offset point in rotated space
     const offset_m = i*stripSpacing;
     const offsetPoint = turf.destination(startPoint, offset_m/1000, 90, {units:'kilometers'});
-    // build a long line north-south through this x (in rotated space)
-    const top = turf.destination(offsetPoint, 20000/1000, 0, {units:'kilometers'}); // 20km north
-    const bottom = turf.destination(offsetPoint, 20000/1000, 180, {units:'kilometers'}); // 20km south
+    const top = turf.destination(offsetPoint, 20000/1000, 0, {units:'kilometers'});
+    const bottom = turf.destination(offsetPoint, 20000/1000, 180, {units:'kilometers'});
     const line = turf.lineString([bottom.geometry.coordinates, top.geometry.coordinates]);
 
-    // split line by rotated polygon -> returns segments
     const split = turf.lineSplit(line, rotatedPoly);
-    // iterate segments and keep those whose midpoint is inside rotatedPoly
     split.features.forEach(seg=>{
       const segMid = turf.midpoint(turf.point(seg.geometry.coordinates[0]), turf.point(seg.geometry.coordinates[seg.geometry.coordinates.length-1]));
       if(turf.booleanPointInPolygon(segMid, rotatedPoly)){
-        // rotate segment back by +dir around centroid
         const segBack = turf.transformRotate(seg, dir, { pivot: centroid });
-        // convert coords to Leaflet latlngs
         const latlngs = segBack.geometry.coordinates.map(c=>[c[1], c[0]]);
-        const polyline = L.polyline(latlngs, {color:'green'}).addTo(layerStrips);
+        L.polyline(latlngs, {color:'green'}).addTo(layerStrips);
 
-        // generate photo points along seg at photoSpacing
         const segLength_km = turf.length(seg, {units:'kilometers'});
         const segLength_m = segLength_km*1000;
         if(segLength_m < 1) return;
@@ -210,10 +338,8 @@ calcBtn.onclick = () => {
         for(let s=0;s<=stepCount;s++){
           const dist_km = (s * photoSpacing)/1000;
           const ptOnSeg = turf.along(seg, dist_km, {units:'kilometers'});
-          // rotate back
           const ptBack = turf.transformRotate(ptOnSeg, dir, { pivot: centroid });
           const coords = ptBack.geometry.coordinates; // [lng,lat]
-          // ensure point is inside original polygon
           if(turf.booleanPointInPolygon(ptBack, poly)){
             L.circleMarker([coords[1], coords[0]], {radius:3, color:'red'}).addTo(layerPhotos);
           }
@@ -222,6 +348,9 @@ calcBtn.onclick = () => {
     });
   }
 };
+
+// initial check
+checkReady();
 </script>
 </body>
 </html>
