@@ -3,42 +3,75 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Mini Drone Planner</title>
+  <title>Drone Planner – GitHub Pages Optimiert</title>
+
+  <!-- Meta für Social Preview -->
+  <meta property="og:title" content="Drone Planner" />
+  <meta property="og:description" content="Mini Drone Planning Tool – EXIF, GPS, Routenplanung und Flugstreifen." />
+  <meta property="og:type" content="website" />
+
+  <!-- Leaflet CSS -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
+  <!-- Layout Styling -->
   <style>
-    body { font-family: sans-serif; margin: 0; padding: 0; }
-    #map { height: 60vh; }
-    #controls { padding: 1rem; }
-    .output { margin-top: 1rem; padding: .5rem; background: #f0f0f0; border-radius: 8px; }
+    body { margin: 0; font-family: sans-serif; display: flex; height: 100vh; }
+    #sidebar {
+      width: 300px;
+      background: #fafafa;
+      padding: 1rem;
+      overflow-y: auto;
+      border-right: 1px solid #ddd;
+    }
+    #map { flex-grow: 1; }
+    h3 { margin-top: 1.5rem; }
+    .output { background: #efefef; padding: .5rem; border-radius: 8px; margin-top: .5rem; }
+    label { display: block; margin-top: .5rem; }
+    input[type="number"] { width: 100%; padding: .3rem; margin-top: .2rem; }
+    button { margin-top: .5rem; padding: .5rem 1rem; }
   </style>
 </head>
 <body>
-  <h2 style="padding:1rem;">Mini Drone Planner</h2>
 
-  <div id="controls">
-    <h3>1. JPG auswählen (EXIF & GPS)</h3>
+  <div id="sidebar">
+    <h2>Drone Planner</h2>
+
+    <h3>1. Bild laden (EXIF)</h3>
     <input type="file" id="imageInput" accept="image/jpeg" />
     <div id="exifOutput" class="output"></div>
 
     <h3>2. Flugroute planen</h3>
-    <p>Klicke mehrere Punkte auf der Karte, um eine Route zu erstellen.</p>
+    <p>Klicke Punkte auf die Karte.</p>
     <button id="clearRoute">Route löschen</button>
+
+    <h3>3. Überlappung</h3>
+    <label>
+      Längsüberlappung (%)
+      <input type="number" id="frontlap" value="70" min="0" max="99" />
+    </label>
+    <label>
+      Querüberlappung (%)
+      <input type="number" id="sidelap" value="60" min="0" max="99" />
+    </label>
+    <button id="calcStrips">Flugstreifen berechnen</button>
+
+    <div id="stripOutput" class="output"></div>
   </div>
 
   <div id="map"></div>
 
+  <!-- Scripts -->
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/exifr/dist/lite.umd.js"></script>
 
   <script>
     // --- Karte Setup ---
     const map = L.map('map').setView([48.137, 11.575], 13);
-    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19,
-    }).addTo(map);
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
 
     let routePoints = [];
     let routeLine = null;
+    let stripLines = [];
 
     map.on('click', (e) => {
       routePoints.push([e.latlng.lat, e.latlng.lng]);
@@ -49,6 +82,8 @@
     document.getElementById('clearRoute').onclick = () => {
       routePoints = [];
       if (routeLine) map.removeLayer(routeLine);
+      stripLines.forEach(l => map.removeLayer(l));
+      stripLines = [];
     };
 
     // --- EXIF auslesen ---
@@ -58,7 +93,6 @@
     input.addEventListener('change', async () => {
       const file = input.files[0];
       if (!file) return;
-
       const exif = await exifr.parse(file);
       exifBox.innerHTML = '';
 
@@ -75,6 +109,36 @@
         map.setView([latitude, longitude], 18);
       }
     });
+
+    // --- Flugstreifen berechnen ---
+    function offsetPoint(lat, lng, dx) {
+      const R = 6378137;
+      const dLat = 0;
+      const dLng = dx / (R * Math.cos(lat * Math.PI/180));
+      return [lat, lng + dLng * 180/Math.PI];
+    }
+
+    document.getElementById('calcStrips').onclick = () => {
+      stripLines.forEach(l => map.removeLayer(l));
+      stripLines = [];
+
+      if (routePoints.length < 2) return;
+
+      const sidelap = parseFloat(document.getElementById('sidelap').value) / 100;
+
+      // Demo: fixe Streifen-Abstände 30 m * sidelap
+      const stripSpacing = 30 * (1 - sidelap);
+
+      const base = routePoints;
+      const leftStrip = base.map(p => offsetPoint(p[0], p[1], -stripSpacing));
+      const rightStrip = base.map(p => offsetPoint(p[0], p[1], stripSpacing));
+
+      stripLines.push(L.polyline(leftStrip, { color: 'green' }).addTo(map));
+      stripLines.push(L.polyline(rightStrip, { color: 'green' }).addTo(map));
+
+      document.getElementById('stripOutput').innerHTML = `Flugstreifen-Abstand: ${stripSpacing.toFixed(2)} m`;
+    };
   </script>
+
 </body>
 </html>
