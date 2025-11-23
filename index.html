@@ -61,7 +61,21 @@
   <div id="map"></div>
 
   <!-- Scripts -->
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js">    const DRONE_DATABASE = {
+      "DJI Mini 4 Pro": {
+        pixelSize_um: 1.22,
+        focalLength_mm: 24,
+        sensorWidth_px: 8064,
+        sensorHeight_px: 6048
+      },
+      "DJI Air 3": {
+        pixelSize_um: 2.4,
+        focalLength_mm: 24,
+        sensorWidth_px: 7000,
+        sensorHeight_px: 5000
+      }
+    };
+  </script>
   <script src="https://cdn.jsdelivr.net/npm/exifr/dist/lite.umd.js"></script>
 
   <script>
