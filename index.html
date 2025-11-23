@@ -61,6 +61,7 @@ button{margin-top:.5rem; padding:.5rem 1rem;}
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/exifr/dist/lite.umd.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/turf/6.5.0/turf.min.js"></script>
 <script>
 const DRONE_DATABASE = {
 "DJI Mini 4 Pro":{pixelSize_um:1.22,focalLength_mm:24,sensorWidth_px:8064,sensorHeight_px:6048},
@@ -101,7 +102,7 @@ updatePixelDisplay();
 droneSelect.addEventListener('change',()=>{updatePixelDisplay(); updateHeight();});
 imageInput.addEventListener('change',async()=>{ const file=imageInput.files[0]; if(!file) return; const exif=await exifr.parse(file); exifBox.innerHTML=''; if(exif){ exifBox.innerHTML=`Lat: ${exif.latitude}, Lon: ${exif.longitude}<br>Width: ${exif.ExifImageWidth||'-'}, Height: ${exif.ExifImageHeight||'-'}, Focal: ${exif.FocalLength||'-'}mm`; if(exif.latitude&&exif.longitude)L.marker([exif.latitude,exif.longitude]).addTo(map).bindPopup('Bildposition').openPopup(); if(exif.FocalLength&&!focalInput.value) focalInput.value=exif.FocalLength; }});
 
-// GSD ↔ Höhe Berechnung mit korrekten Einheiten
+// GSD ↔ Höhe Berechnung
 const gsdInput=document.getElementById('gsd');
 const heightInput=document.getElementById('height');
 function updateHeight(){
@@ -137,6 +138,7 @@ function clearStrips(){stripLayers.forEach(l=>map.removeLayer(l)); stripLayers=[
 calcBtn.onclick=()=>{
   if(!polygon || !polygon.getBounds()){ alert('Bitte Polygon zeichnen!'); return; }
   clearStrips();
+
   const drone=DRONE_DATABASE[droneSelect.value];
   const pixelSize_m=(parseFloat(pixelInput.value)||drone.pixelSize_um)*1e-6;
   const focal_m=(parseFloat(focalInput.value)||drone.focalLength_mm)*1e-3;
@@ -146,30 +148,37 @@ calcBtn.onclick=()=>{
   const frontlap=parseFloat(frontlapInput.value)/100;
   const sidelap=parseFloat(sidelapInput.value)/100;
   const dir_deg=parseFloat(directionInput.value)%360;
+
   if([pixelSize_m,focal_m,H,frontlap,sidelap,dir_deg].some(v=>isNaN(v))){ alert('Parameter ungültig!'); return; }
 
-  // Footprint berechnen
-  const footprintX=H*focal_m/pixelSize_m*imgW/100; // in m
-  const footprintY=H*focal_m/pixelSize_m*imgH/100; // in m
+  const footprintX = H*focal_m/pixelSize_m*imgW/100;
+  const footprintY = H*focal_m/pixelSize_m*imgH/100;
   stripOutput.innerHTML=`Footprint: ${footprintX.toFixed(2)}m x ${footprintY.toFixed(2)}m`;
 
-  // Bounds und Schrittweiten
-  const bounds=polygon.getBounds();
-  const north=bounds.getNorth(), south=bounds.getSouth(), west=bounds.getWest(), east=bounds.getEast();
-  const alongDist=footprintY*(1-frontlap)/111111;
-  const acrossDist=footprintX*(1-sidelap)/111111;
+  // Polygon in GeoJSON für Turf
+  const polyGeo = polygon.toGeoJSON();
+  const polyBBox = turf.bbox(polyGeo);
 
-  // Flugstreifen erstellen (vereinfachte Rotation)
-  let y=south;
-  while(y<north){
-    const line=[[y,west],[y,east]];
-    stripLayers.push(L.polyline(line,{color:'green'}).addTo(map));
-    let x=west;
-    while(x<east){
-      stripLayers.push(L.circleMarker([y,x],{radius:3,color:'red'}).addTo(map));
-      x+=alongDist;
-    }
-    y+=acrossDist;
+  // Abstand zwischen Streifen / Fotos
+  const alongDist = footprintY*(1-frontlap);
+  const acrossDist = footprintX*(1-sidelap);
+
+  // Flugstreifen erzeugen (vereinfacht) parallel zur Richtung
+  const angleRad = dir_deg*Math.PI/180;
+  const cosA = Math.cos(angleRad), sinA = Math.sin(angleRad);
+
+  const xMin = polyBBox[0]; const yMin = polyBBox[1];
+  const xMax = polyBBox[2]; const yMax = polyBBox[3];
+  const diagonal = Math.hypot(xMax-xMin, yMax-yMin);
+  const numStrips = Math.ceil(diagonal/acrossDist)+1;
+
+  for(let i=0;i<numStrips;i++){
+    const offset = (i - numStrips/2)*acrossDist;
+    const start = turf.transformTranslate(polyGeo,{distance:offset,unit:'meters',bearing:(dir_deg+90)%360});
+    const line = turf.lineString([start.geometry.coordinates[0], start.geometry.coordinates[1]]);
+    // Clip Linie mit Polygon
+    // Vereinfachte Darstellung als Linie über Polygon für Anzeige
+    stripLayers.push(L.polyline([[yMin,xMin],[yMax,xMax]],{color:'green'}).addTo(map));
   }
 };
 </script>
