@@ -38,10 +38,10 @@ button{margin-top:.5rem; padding:.5rem 1rem;}
 <label>Brennweite [mm]:</label>
 <input type="number" id="focalLength" placeholder="Auto / EXIF" />
 <label>Pixelgröße [µm]:</label>
-<input type="number" id="pixelSize" placeholder="Auto / Drohnen-Daten" />
+<input type="number" id="pixelSize" placeholder="Auto / Drohnen-Daten" readonly />
 <div id="exifOutput" class="output"></div>
 <h3>2. Flugplanung</h3>
-<p>Polygon auf der Karte zeichnen.</p>
+<p>Polygon auf der Karte zeichnen (Klick auf das Polygon-Symbol im Karte-Tool).</p>
 <label>GSD [cm/pixel]:</label>
 <input type="number" id="gsd" value="2" min="0.1" step="0.1" />
 <label>Flughöhe [m]:</label>
@@ -58,23 +58,23 @@ button{margin-top:.5rem; padding:.5rem 1rem;}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/exifr/dist/lite.umd.js"></script>
 <script>
-const DRONE_DATABASE = { /* 10 Drohnen wie vorher */
-  "DJI Mini 4 Pro": { pixelSize_um: 1.22, focalLength_mm: 24, sensorWidth_px: 8064, sensorHeight_px: 6048 },
-  "DJI Air 3": { pixelSize_um: 2.4, focalLength_mm: 24, sensorWidth_px: 7000, sensorHeight_px: 5000 },
-  "DJI Mavic 3E": { pixelSize_um: 2.4, focalLength_mm: 35, sensorWidth_px: 8192, sensorHeight_px: 5460 },
-  "DJI Mavic 3 Pro": { pixelSize_um: 2.4, focalLength_mm: 28, sensorWidth_px: 8192, sensorHeight_px: 5460 },
-  "DJI Mavic 3 Classic": { pixelSize_um: 2.4, focalLength_mm: 24, sensorWidth_px: 8192, sensorHeight_px: 5460 },
-  "DJI Mavic 3 Enterprise": { pixelSize_um: 2.4, focalLength_mm: 35, sensorWidth_px: 8192, sensorHeight_px: 5460 },
-  "DJI Mini 3 Pro": { pixelSize_um: 1.55, focalLength_mm: 24, sensorWidth_px: 4000, sensorHeight_px: 3000 },
-  "DJI Mini 3 SE": { pixelSize_um: 1.55, focalLength_mm: 24, sensorWidth_px: 4000, sensorHeight_px: 3000 },
-  "DJI Matrice 300 RTK": { pixelSize_um: 3.76, focalLength_mm: 35, sensorWidth_px: 5472, sensorHeight_px: 3648 },
-  "DJI Matrice 350 RTK": { pixelSize_um: 3.76, focalLength_mm: 35, sensorWidth_px: 5472, sensorHeight_px: 3648 }
+const DRONE_DATABASE = {
+"DJI Mini 4 Pro":{pixelSize_um:1.22,focalLength_mm:24,sensorWidth_px:8064,sensorHeight_px:6048},
+"DJI Air 3":{pixelSize_um:2.4,focalLength_mm:24,sensorWidth_px:7000,sensorHeight_px:5000},
+"DJI Mavic 3E":{pixelSize_um:2.4,focalLength_mm:35,sensorWidth_px:8192,sensorHeight_px:5460},
+"DJI Mavic 3 Pro":{pixelSize_um:2.4,focalLength_mm:28,sensorWidth_px:8192,sensorHeight_px:5460},
+"DJI Mavic 3 Classic":{pixelSize_um:2.4,focalLength_mm:24,sensorWidth_px:8192,sensorHeight_px:5460},
+"DJI Mavic 3 Enterprise":{pixelSize_um:2.4,focalLength_mm:35,sensorWidth_px:8192,sensorHeight_px:5460},
+"DJI Mini 3 Pro":{pixelSize_um:1.55,focalLength_mm:24,sensorWidth_px:4000,sensorHeight_px:3000},
+"DJI Mini 3 SE":{pixelSize_um:1.55,focalLength_mm:24,sensorWidth_px:4000,sensorHeight_px:3000},
+"DJI Matrice 300 RTK":{pixelSize_um:3.76,focalLength_mm:35,sensorWidth_px:5472,sensorHeight_px:3648},
+"DJI Matrice 350 RTK":{pixelSize_um:3.76,focalLength_mm:35,sensorWidth_px:5472,sensorHeight_px:3648}
 };
 
-const map = L.map('map').setView([48.137, 11.575], 13);
+const map=L.map('map').setView([48.137,11.575],13);
 L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19}).addTo(map);
-const drawnItems = new L.FeatureGroup().addTo(map);
-const drawControl = new L.Control.Draw({ draw:{polyline:false,rectangle:false,circle:false,marker:false,circlemarker:false,polygon:{allowIntersection:false}},edit:{featureGroup:drawnItems}});
+const drawnItems=new L.FeatureGroup().addTo(map);
+const drawControl=new L.Control.Draw({draw:{polyline:false,rectangle:false,circle:false,marker:false,circlemarker:false,polygon:{allowIntersection:false}},edit:{featureGroup:drawnItems}});
 map.addControl(drawControl);
 let polygon=null;
 map.on(L.Draw.Event.CREATED,function(e){drawnItems.clearLayers();polygon=e.layer;drawnItems.addLayer(polygon);});
@@ -84,7 +84,24 @@ const exifBox=document.getElementById('exifOutput');
 const droneSelect=document.getElementById('droneSelect');
 const focalInput=document.getElementById('focalLength');
 const pixelInput=document.getElementById('pixelSize');
-imageInput.addEventListener('change',async()=>{const file=imageInput.files[0];if(!file)return;const exif=await exifr.parse(file);exifBox.innerHTML='';if(exif){exifBox.innerHTML=`Lat: ${exif.latitude}, Lon: ${exif.longitude}<br>Width: ${exif.ExifImageWidth||'-'}, Height: ${exif.ExifImageHeight||'-'}, Focal: ${exif.FocalLength||'-'}mm`;if(exif.latitude&&exif.longitude)L.marker([exif.latitude,exif.longitude]).addTo(map).bindPopup('Bildposition').openPopup();if(exif.FocalLength&&!focalInput.value)focalInput.value=exif.FocalLength;}});
+function updatePixelDisplay(){
+  const drone=DRONE_DATABASE[droneSelect.value];
+  pixelInput.value=drone.pixelSize_um;
+}
+updatePixelDisplay();
+droneSelect.addEventListener('change',()=>{updatePixelDisplay(); updateHeight();});
+
+imageInput.addEventListener('change',async()=>{
+const file=imageInput.files[0];
+if(!file)return;
+const exif=await exifr.parse(file);
+exifBox.innerHTML='';
+if(exif){
+  exifBox.innerHTML=`Lat: ${exif.latitude}, Lon: ${exif.longitude}<br>Width: ${exif.ExifImageWidth||'-'}, Height: ${exif.ExifImageHeight||'-'}, Focal: ${exif.FocalLength||'-'}mm`;
+  if(exif.latitude&&exif.longitude)L.marker([exif.latitude,exif.longitude]).addTo(map).bindPopup('Bildposition').openPopup();
+  if(exif.FocalLength&&!focalInput.value) focalInput.value=exif.FocalLength;
+}}
+);
 
 const gsdInput=document.getElementById('gsd');
 const heightInput=document.getElementById('height');
@@ -115,20 +132,20 @@ const footprintX=H*focal/(pixelSize*1e3)*imgW/100;
 const footprintY=H*focal/(pixelSize*1e3)*imgH/100;
 stripOutput.innerHTML=`Footprint: ${footprintX.toFixed(2)}m x ${footprintY.toFixed(2)}m`;
 
-// Flugstreifen innerhalb Polygon
 const bounds=polygon.getBounds();
 const north=bounds.getNorth(), south=bounds.getSouth(), west=bounds.getWest(), east=bounds.getEast();
-let y=south;while(y<north){
+let y=south;
+while(y<north){
   const line=[[y,west],[y,east]];
   const polyline=L.polyline(line,{color:'green'}).addTo(map);
   stripLayers.push(polyline);
-  // Bildpunkte berechnen
   const alongDist=footprintY*(1-frontlap)/111111;
   const acrossDist=footprintX*(1-sidelap)/111111;
-  for(let i=0;i<=10;i++){ // Beispiel: 10 Bilder pro Linie
-    const lat=y+(i*alongDist);
-    const marker=L.circleMarker([lat,(west+east)/2],{radius:3,color:'red'}).addTo(map);
+  let x=west;
+  while(x<east){
+    const marker=L.circleMarker([y,x],{radius:3,color:'red'}).addTo(map);
     stripLayers.push(marker);
+    x+=alongDist;
   }
   y+=acrossDist;
 }
