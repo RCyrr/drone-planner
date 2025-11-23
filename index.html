@@ -85,10 +85,8 @@ map.addControl(drawControl);
 let polygon=null;
 
 // Polygon Buttons
-const drawBtn=document.getElementById('drawPolygonBtn');
-drawBtn.onclick=()=>{ if(!L.Draw){ alert('Leaflet Draw nicht geladen!'); return;} new L.Draw.Polygon(map, drawControl.options.draw.polygon).enable();};
-const clearBtn=document.getElementById('clearPolygonBtn');
-clearBtn.onclick=()=>{ drawnItems.clearLayers(); polygon=null; clearStrips(); };
+document.getElementById('drawPolygonBtn').onclick=()=>{ if(!L.Draw){ alert('Leaflet Draw nicht geladen!'); return;} new L.Draw.Polygon(map, drawControl.options.draw.polygon).enable();};
+document.getElementById('clearPolygonBtn').onclick=()=>{ drawnItems.clearLayers(); polygon=null; clearStrips(); };
 map.on(L.Draw.Event.CREATED,function(e){ drawnItems.clearLayers(); polygon=e.layer; if(!(polygon instanceof L.Polygon)){ alert('Fehler: Kein Polygon erstellt!'); polygon=null; return;} drawnItems.addLayer(polygon); });
 
 // EXIF / Drohnenwerte
@@ -126,7 +124,7 @@ function updateGSD(){
 gsdInput.addEventListener('input',updateHeight);
 heightInput.addEventListener('input',updateGSD);
 
-// Flugstreifen
+// Flugstreifen + Foto-Punkte
 const frontlapInput=document.getElementById('frontlap');
 const sidelapInput=document.getElementById('sidelap');
 const directionInput=document.getElementById('flightDirection');
@@ -138,7 +136,6 @@ function clearStrips(){stripLayers.forEach(l=>map.removeLayer(l)); stripLayers=[
 calcBtn.onclick=()=>{
   if(!polygon || !polygon.getBounds()){ alert('Bitte Polygon zeichnen!'); return; }
   clearStrips();
-
   const drone=DRONE_DATABASE[droneSelect.value];
   const pixelSize_m=(parseFloat(pixelInput.value)||drone.pixelSize_um)*1e-6;
   const focal_m=(parseFloat(focalInput.value)||drone.focalLength_mm)*1e-3;
@@ -151,34 +148,32 @@ calcBtn.onclick=()=>{
 
   if([pixelSize_m,focal_m,H,frontlap,sidelap,dir_deg].some(v=>isNaN(v))){ alert('Parameter ungültig!'); return; }
 
-  const footprintX = H*focal_m/pixelSize_m*imgW/100;
-  const footprintY = H*focal_m/pixelSize_m*imgH/100;
-  stripOutput.innerHTML=`Footprint: ${footprintX.toFixed(2)}m x ${footprintY.toFixed(2)}m`;
+  const sensorWidth_m = imgW*pixelSize_m;
+  const sensorHeight_m = imgH*pixelSize_m;
+  const footprintX = H*sensorWidth_m/focal_m;
+  const footprintY = H*sensorHeight_m/focal_m;
+  stripOutput.innerHTML=`Footprint: ${footprintX.toFixed(2)} m x ${footprintY.toFixed(2)} m`;
 
-  // Polygon in GeoJSON für Turf
   const polyGeo = polygon.toGeoJSON();
   const polyBBox = turf.bbox(polyGeo);
 
-  // Abstand zwischen Streifen / Fotos
   const alongDist = footprintY*(1-frontlap);
   const acrossDist = footprintX*(1-sidelap);
-
-  // Flugstreifen erzeugen (vereinfacht) parallel zur Richtung
   const angleRad = dir_deg*Math.PI/180;
   const cosA = Math.cos(angleRad), sinA = Math.sin(angleRad);
 
-  const xMin = polyBBox[0]; const yMin = polyBBox[1];
-  const xMax = polyBBox[2]; const yMax = polyBBox[3];
-  const diagonal = Math.hypot(xMax-xMin, yMax-yMin);
-  const numStrips = Math.ceil(diagonal/acrossDist)+1;
-
-  for(let i=0;i<numStrips;i++){
-    const offset = (i - numStrips/2)*acrossDist;
-    const start = turf.transformTranslate(polyGeo,{distance:offset,unit:'meters',bearing:(dir_deg+90)%360});
-    const line = turf.lineString([start.geometry.coordinates[0], start.geometry.coordinates[1]]);
-    // Clip Linie mit Polygon
-    // Vereinfachte Darstellung als Linie über Polygon für Anzeige
-    stripLayers.push(L.polyline([[yMin,xMin],[yMax,xMax]],{color:'green'}).addTo(map));
+  // Bounding-Box Approximation für Streifen (vereinfachte Umsetzung)
+  const minX = polyBBox[0], minY = polyBBox[1], maxX = polyBBox[2], maxY = polyBBox[3];
+  let stripOffset = 0;
+  while(stripOffset <= (maxX - minX + diagonal)) {
+    const linePoints = [];
+    for(let y = minY; y <= maxY; y += alongDist/111111){
+      linePoints.push([y, minX + stripOffset]);
+    }
+    stripLayers.push(L.polyline(linePoints,{color:'green'}).addTo(map));
+    // Foto-Punkte entlang Linie
+    linePoints.forEach(p=>{if(turf.booleanPointInPolygon(turf.point([p[1],p[0]]), polyGeo)) stripLayers.push(L.circleMarker([p[0],p[1]],{radius:3,color:'red'}).addTo(map));});
+    stripOffset += acrossDist;
   }
 };
 </script>
