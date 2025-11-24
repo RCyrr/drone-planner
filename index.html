@@ -17,48 +17,71 @@ input, select{width:100%; padding:.3rem; margin-top:.2rem;}
 button{margin-top:.5rem; padding:.5rem 1rem;}
 .small{font-size:.9rem; color:#666}
 .warning{color:#a00; font-weight:bold}
+#langToggle { float:right; margin-top:0; padding:.3rem .6rem; font-size:.9rem; }
+#summary table { width:100%; font-size:.9rem; margin-top:.5rem; border-collapse:collapse; }
+#summary td { padding:.2rem; border-bottom:1px solid #ddd; }
+#summary td:first-child { font-weight:bold; }
+.export-btn { margin-right:.5rem; margin-top:.5rem; }
+
+/* Mobile responsive */
+@media (max-width: 768px) {
+  body { flex-direction:column; }
+  #sidebar { width:100%; height:50vh; position:relative; }
+  #map { height:50vh; }
+  button, input, select { font-size:1rem; padding:.6rem; }
+  #langToggle { position:absolute; top:1rem; right:1rem; }
+}
 </style>
 </head>
 <body>
 <div id="sidebar">
-<h2>Drone Planner</h2>
-<h3>1. Bild / Drohne</h3>
-<input type="file" id="imageInput" accept="image/jpeg" />
-<label>Drohne:</label>
-<select id="droneSelect">
-<option value="" disabled selected>Drohne wählen...</option>
-<option value="DJI Mini 4 Pro">DJI Mini 4 Pro</option>
-<option value="DJI Air 3">DJI Air 3</option>
-<option value="DJI Mavic 3E">DJI Mavic 3E</option>
-<option value="DJI Mavic 4E">DJI Mavic 4E</option>
-<option value="DJI Mini 3 Pro">DJI Mini 3 Pro</option>
-<option value="DJI Matrice 300 RTK">DJI Matrice 300 RTK</option>
-<option value="DJI Phantom 4 RTK">DJI Phantom 4 RTK</option>
-<option value="DJI Matrice 350 RTK">DJI Matrice 350 RTK</option>
-<option value="custom">Custom Drone...</option>
-</select>
-<label>Brennweite [mm]:</label>
-<input type="number" id="focalLength" placeholder="Wird automatisch gesetzt" />
-<label>Pixelgröße [µm]:</label>
-<input type="number" id="pixelSize" placeholder="Wird automatisch gesetzt" />
-<div id="exifOutput" class="output"></div>
-<div id="droneNote" class="small"></div>
-<h3>2. Flugplanung</h3>
-<p>Polygon zeichnen:</p>
-<button id="drawPolygonBtn">Polygon zeichnen</button>
-<button id="clearPolygonBtn">Polygon löschen</button>
-<label>Flugrichtung [° 0=Nord, 90=Ost]:</label>
-<input type="number" id="flightDirection" value="0" min="0" max="359" />
-<label>GSD [cm/pixel]:</label>
-<input type="number" id="gsd" value="2" min="0.1" step="0.1" />
-<label>Flughöhe [m]:</label>
-<input type="number" id="height" value="50" min="1" step="1" />
-<label>Längsüberlappung [%]:</label>
-<input type="number" id="frontlap" value="70" min="0" max="99" />
-<label>Querüberlappung [%]:</label>
-<input type="number" id="sidelap" value="60" min="0" max="99" />
-<button id="calcStrips" disabled>Flugstreifen berechnen</button>
-<div id="stripOutput" class="output"></div>
+  <h2>Drone Planner <button id="langToggle">EN</button></h2>
+  <h3 id="section1">1. Bild / Drohne</h3>
+  <input type="file" id="imageInput" accept="image/jpeg" />
+  <label id="labelDrone">Drohne:</label>
+  <select id="droneSelect">
+    <option value="" disabled selected>Drohne wählen...</option>
+    <option value="DJI Mini 4 Pro">DJI Mini 4 Pro</option>
+    <option value="DJI Air 3">DJI Air 3</option>
+    <option value="DJI Mavic 3E">DJI Mavic 3E</option>
+    <option value="DJI Mavic 4E">DJI Mavic 4E</option>
+    <option value="DJI Mini 3 Pro">DJI Mini 3 Pro</option>
+    <option value="DJI Matrice 300 RTK">DJI Matrice 300 RTK</option>
+    <option value="DJI Phantom 4 RTK">DJI Phantom 4 RTK</option>
+    <option value="DJI Matrice 350 RTK">DJI Matrice 350 RTK</option>
+    <option value="custom">Custom Drone...</option>
+  </select>
+  <label id="labelFocal">Brennweite [mm]:</label>
+  <input type="number" id="focalLength" placeholder="Wird automatisch gesetzt" />
+  <label id="labelPixel">Pixelgröße [µm]:</label>
+  <input type="number" id="pixelSize" placeholder="Wird automatisch gesetzt" />
+  <div id="exifOutput" class="output"></div>
+  <div id="droneNote" class="small"></div>
+  <h3 id="section2">2. Flugplanung</h3>
+  <p id="polygonDraw">Polygon zeichnen:</p>
+  <button id="drawPolygonBtn">Polygon zeichnen</button>
+  <button id="clearPolygonBtn">Polygon löschen</button>
+  <label id="labelShapefile">Shapefile importieren:</label>
+  <input type="file" id="shapefileInput" accept=".shp" />
+  <label id="labelDirection">Flugrichtung [° 0=Nord, 90=Ost]:</label>
+  <input type="number" id="flightDirection" value="0" min="0" max="359" />
+  <label id="labelGsd">GSD [cm/pixel]:</label>
+  <input type="number" id="gsd" value="2" min="0.1" step="0.1" />
+  <label id="labelHeight">Flughöhe [m]:</label>
+  <input type="number" id="height" value="50" min="1" step="1" />
+  <label id="labelFrontlap">Längsüberlappung [%]:</label>
+  <input type="number" id="frontlap" value="70" min="0" max="99" />
+  <label id="labelSidelap">Querüberlappung [%]:</label>
+  <input type="number" id="sidelap" value="60" min="0" max="99" />
+  <button id="calcStrips" disabled>Flugstreifen berechnen</button>
+  <div id="stripOutput" class="output"></div>
+  <div id="summary" style="display:none;">
+    <h3 id="summaryTitle">Zusammenfassung</h3>
+    <div id="summaryWarning" class="warning"></div>
+    <table id="summaryTable"></table>
+    <button id="exportCsv" class="export-btn">CSV Export</button>
+    <button id="exportJson" class="export-btn">JSON Export</button>
+  </div>
 </div>
 <div id="map"></div>
 
@@ -67,6 +90,7 @@ button{margin-top:.5rem; padding:.5rem 1rem;}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/exifr/dist/lite.umd.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@turf/turf/turf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/shapefile@0.6.6/dist/shapefile.min.js"></script>
 
 <script>
 // Expanded drone database with EXIF model tags (modelTag)
@@ -80,6 +104,107 @@ const DRONE_DATABASE = {
   "DJI Phantom 4 RTK":{modelTag:'FC6310R',pixelSize_um:2.4,focalLength_mm:8.8,sensorWidth_px:5472,sensorHeight_px:3648},
   "DJI Matrice 350 RTK":{modelTag:'M350',pixelSize_um:3.76,focalLength_mm:35,sensorWidth_px:5472,sensorHeight_px:3648}
 };
+
+const TRANSLATIONS = {
+  de: {
+    title: 'Drone Planner – GitHub Pages Optimiert',
+    appTitle: 'Drone Planner',
+    section1: '1. Bild / Drohne',
+    section2: '2. Flugplanung',
+    labelDrone: 'Drohne:',
+    dronePlaceholder: 'Drohne wählen...',
+    labelFocal: 'Brennweite [mm]:',
+    focalPlaceholder: 'Wird automatisch gesetzt',
+    labelPixel: 'Pixelgröße [µm]:',
+    pixelPlaceholder: 'Wird automatisch gesetzt',
+    polygonDraw: 'Polygon zeichnen:',
+    drawBtn: 'Polygon zeichnen',
+    clearBtn: 'Polygon löschen',
+    labelShapefile: 'Shapefile importieren:',
+    labelDirection: 'Flugrichtung [° 0=Nord, 90=Ost]:',
+    labelGsd: 'GSD [cm/pixel]:',
+    labelHeight: 'Flughöhe [m]:',
+    labelFrontlap: 'Längsüberlappung [%]:',
+    labelSidelap: 'Querüberlappung [%]:',
+    calcBtn: 'Flugstreifen berechnen',
+    exifNone: 'Keine EXIF-Daten gefunden.',
+    exifFormat: 'EXIF: Model={model}, Focal={focal}mm, Size={width}x{height}',
+    droneCustomNote: 'Custom Drone: bitte Brennweite und Pixelgröße eingeben (Pixelgröße in µm)',
+    droneDbNotePrefix: 'Aus Drohnendatenbank geladen: modelTag=',
+    summaryTitle: 'Zusammenfassung',
+    summaryArea: 'Fläche',
+    summaryStrips: 'Anzahl Streifen',
+    summaryPhotos: 'Anzahl Fotos',
+    summaryLength: 'Gesamtlänge',
+    summaryTime: 'Geschätzte Flugzeit',
+    exportCsv: 'CSV Export',
+    exportJson: 'JSON Export'
+  },
+  en: {
+    title: 'Drone Planner – GitHub Pages Optimized',
+    appTitle: 'Drone Planner',
+    section1: '1. Image / Drone',
+    section2: '2. Flight Planning',
+    labelDrone: 'Drone:',
+    dronePlaceholder: 'Select drone...',
+    labelFocal: 'Focal Length [mm]:',
+    focalPlaceholder: 'Auto-filled',
+    labelPixel: 'Pixel Size [µm]:',
+    pixelPlaceholder: 'Auto-filled',
+    polygonDraw: 'Draw Polygon:',
+    drawBtn: 'Draw Polygon',
+    clearBtn: 'Clear Polygon',
+    labelShapefile: 'Import Shapefile:',
+    labelDirection: 'Flight Direction [° 0=North, 90=East]:',
+    labelGsd: 'GSD [cm/pixel]:',
+    labelHeight: 'Flight Height [m]:',
+    labelFrontlap: 'Front Overlap [%]:',
+    labelSidelap: 'Side Overlap [%]:',
+    calcBtn: 'Calculate Flight Strips',
+    exifNone: 'No EXIF data found.',
+    exifFormat: 'EXIF: Model={model}, Focal={focal}mm, Size={width}x{height}',
+    droneCustomNote: 'Custom Drone: please enter focal length and pixel size (pixel size in µm)',
+    droneDbNotePrefix: 'Loaded from drone database: modelTag=',
+    summaryTitle: 'Summary',
+    summaryArea: 'Area',
+    summaryStrips: 'Number of Strips',
+    summaryPhotos: 'Number of Photos',
+    summaryLength: 'Total Length',
+    summaryTime: 'Estimated Flight Time',
+    exportCsv: 'Export CSV',
+    exportJson: 'Export JSON'
+  }
+};
+
+let currentLang = localStorage.getItem('dronePlannerLang') || 'de';
+function t(key) { return TRANSLATIONS[currentLang][key] || key; }
+function setLanguage(lang) {
+  currentLang = lang;
+  localStorage.setItem('dronePlannerLang', lang);
+  document.documentElement.lang = lang;
+  document.getElementById('langToggle').textContent = lang === 'de' ? 'EN' : 'DE';
+  // Update all UI texts
+  document.getElementById('section1').textContent = t('section1');
+  document.getElementById('section2').textContent = t('section2');
+  document.getElementById('labelDrone').textContent = t('labelDrone');
+  document.getElementById('droneSelect').options[0].text = t('dronePlaceholder');
+  document.getElementById('labelFocal').textContent = t('labelFocal');
+  document.getElementById('focalLength').placeholder = t('focalPlaceholder');
+  document.getElementById('labelPixel').textContent = t('labelPixel');
+  document.getElementById('pixelSize').placeholder = t('pixelPlaceholder');
+  document.getElementById('polygonDraw').textContent = t('polygonDraw');
+  document.getElementById('drawPolygonBtn').textContent = t('drawBtn');
+  document.getElementById('clearPolygonBtn').textContent = t('clearBtn');
+  document.getElementById('labelDirection').textContent = t('labelDirection');
+  document.getElementById('labelGsd').textContent = t('labelGsd');
+  document.getElementById('labelHeight').textContent = t('labelHeight');
+  document.getElementById('labelFrontlap').textContent = t('labelFrontlap');
+  document.getElementById('labelSidelap').textContent = t('labelSidelap');
+  document.getElementById('calcStrips').textContent = t('calcBtn');
+  document.getElementById('summaryTitle').textContent = t('summaryTitle');
+  document.getElementById('exportCsv').textContent = t('exportCsv');
+  document.getElementById('exportJson').textContent = t('exportJson');
+}
 
 const map = L.map('map').setView([48.137,11.575],13);
 L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19}).addTo(map);
@@ -111,11 +236,23 @@ const frontlapInput = document.getElementById('frontlap');
 const sidelapInput = document.getElementById('sidelap');
 const directionInput = document.getElementById('flightDirection');
 const stripOutput = document.getElementById('stripOutput');
+const summaryDiv = document.getElementById('summary');
+const summaryTable = document.getElementById('summaryTable');
+const exportCsvBtn = document.getElementById('exportCsv');
+const exportJsonBtn = document.getElementById('exportJson');
+const shapefileInput = document.getElementById('shapefileInput');
 
 // init state
 pixelInput.readOnly = true;
 focalInput.readOnly = false; // allow override even for DB entries
 calcBtn.disabled = true;
+setLanguage(currentLang);
+
+// Format numbers with German decimal comma and fixed decimals
+function formatNumberDE(num, decimals=2) {
+  if (isNaN(num)) return '-';
+  return num.toFixed(decimals).replace('.', ',');
+}
 
 function setDroneValues(name){
   if(!name || name==='') return;
@@ -125,7 +262,7 @@ function setDroneValues(name){
     focalInput.readOnly = false;
     pixelInput.value = '';
     focalInput.value = '';
-    droneNote.innerText = 'Custom Drone: bitte Brennweite und Pixelgröße eingeben (Pixelgröße in µm)';
+    droneNote.innerText = t('droneCustomNote');
     return;
   }
   const d = DRONE_DATABASE[name];
@@ -134,7 +271,7 @@ function setDroneValues(name){
     pixelInput.readOnly = true;
     focalInput.value = d.focalLength_mm;
     focalInput.readOnly = false; // user still allowed to override
-    droneNote.innerText = `Aus Drohnendatenbank geladen: modelTag=${d.modelTag}`;
+    droneNote.innerText = t('droneDbNotePrefix') + d.modelTag;
   }
 }
 
@@ -165,14 +302,18 @@ imageInput.addEventListener('change', async ()=>{
   const file = imageInput.files[0]; if(!file) return;
   const exif = await exifr.parse(file);
   exifBox.innerHTML = '';
-  if(!exif){ exifBox.innerText = 'Keine EXIF-Daten gefunden.'; return; }
+  if(!exif){ exifBox.innerText = t('exifNone'); return; }
 
   const exifModel = exif.Model || exif.Make || null; // try Model first then Make
   const exifFocal = exif.FocalLength || exif.FocalLengthIn35mmFormat || null;
   const exifW = exif.ExifImageWidth || exif.PixelXDimension || null;
   const exifH = exif.ExifImageHeight || exif.PixelYDimension || null;
 
-  exifBox.innerHTML = `EXIF: Model=${exifModel||'-'}, Focal=${exifFocal||'-'}mm, Size=${exifW||'-'}x${exifH||'-'}`;
+  exifBox.innerHTML = t('exifFormat')
+    .replace('{model}', exifModel||'-')
+    .replace('{focal}', exifFocal||'-')
+    .replace('{width}', exifW||'-')
+    .replace('{height}', exifH||'-');
 
   // try match drone by modelTag
   let matchedName = null;
@@ -260,6 +401,62 @@ frontlapInput.addEventListener('input', checkReady);
 sidelapInput.addEventListener('input', checkReady);
 directionInput.addEventListener('input', checkReady);
 
+// Shapefile import
+shapefileInput.addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  
+  try {
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      const arrayBuffer = event.target.result;
+      const geojson = await shapefile.read(arrayBuffer);
+      
+      if (geojson.features && geojson.features.length > 0) {
+        // Clear existing polygon
+        drawnItems.clearLayers();
+        polygon = null;
+        clearStrips();
+        
+        // Find first polygon feature
+        const polygonFeature = geojson.features.find(f =>
+          f.geometry.type === 'Polygon' || f.geometry.type === 'MultiPolygon'
+        );
+        
+        if (polygonFeature) {
+          // Convert to Leaflet layer
+          const layer = L.geoJSON(polygonFeature, {
+            style: { color: 'blue', weight: 2 }
+          });
+          
+          // Get the polygon geometry
+          const coords = polygonFeature.geometry.type === 'Polygon'
+            ? polygonFeature.geometry.coordinates
+            : polygonFeature.geometry.coordinates[0];
+          
+          // Create Leaflet polygon
+          const latlngs = coords[0].map(coord => [coord[1], coord[0]]);
+          polygon = L.polygon(latlngs, { color: 'blue', weight: 2 });
+          drawnItems.addLayer(polygon);
+          
+          // Center map on polygon
+          map.fitBounds(polygon.getBounds());
+          
+          stripOutput.innerHTML = `Shapefile imported: ${polygonFeature.geometry.type}`;
+          checkReady();
+        } else {
+          stripOutput.innerHTML = 'No polygon found in shapefile';
+        }
+      } else {
+        stripOutput.innerHTML = 'Invalid shapefile or no features found';
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  } catch (error) {
+    stripOutput.innerHTML = `Error loading shapefile: ${error.message}`;
+  }
+});
+
 // Polygon drawing
 drawBtn.onclick = ()=>{ new L.Draw.Polygon(map, drawControl.options.draw.polygon).enable(); };
 clearBtn.onclick = ()=>{ drawnItems.clearLayers(); polygon=null; clearStrips(); checkReady(); };
@@ -276,6 +473,8 @@ map.on(L.Draw.Event.CREATED, function(e){
 
 // Flugstreifen + Foto-Punkte (wie zuvor, unchanged)
 function clearStrips(){ layerStrips.clearLayers(); layerPhotos.clearLayers(); }
+
+let summaryStats = {};
 
 calcBtn.onclick = () => {
   if(!polygon) return;
@@ -313,9 +512,15 @@ calcBtn.onclick = () => {
   const rightPoint = turf.point([maxX, bboxCenter[1]]);
   const totalWidth_km = turf.distance(leftPoint, rightPoint, {units:'kilometers'});
   const totalWidth_m = totalWidth_km*1000;
-  const numStrips = Math.ceil((totalWidth_m + stripSpacing*4) / stripSpacing);
-  const startPoint = turf.destination(leftPoint, (-2*stripSpacing)/1000, 90, {units:'kilometers'});
+  // More accurate strip calculation - use less padding
+  let numStrips = Math.ceil((totalWidth_m + stripSpacing) / stripSpacing);
+  const startPoint = turf.destination(leftPoint, (-stripSpacing)/1000, 90, {units:'kilometers'});
 
+  let totalPhotos = 0;
+  let totalStripLengthKm = 0;
+
+  let actualStripCount = 0; // Track actual strips drawn
+  
   for(let i=0;i<numStrips;i++){
     const offset_m = i*stripSpacing;
     const offsetPoint = turf.destination(startPoint, offset_m/1000, 90, {units:'kilometers'});
@@ -324,15 +529,18 @@ calcBtn.onclick = () => {
     const line = turf.lineString([bottom.geometry.coordinates, top.geometry.coordinates]);
 
     const split = turf.lineSplit(line, rotatedPoly);
+    let stripSegments = 0;
     split.features.forEach(seg=>{
       const segMid = turf.midpoint(turf.point(seg.geometry.coordinates[0]), turf.point(seg.geometry.coordinates[seg.geometry.coordinates.length-1]));
       if(turf.booleanPointInPolygon(segMid, rotatedPoly)){
         const segBack = turf.transformRotate(seg, dir, { pivot: centroid });
         const latlngs = segBack.geometry.coordinates.map(c=>[c[1], c[0]]);
         L.polyline(latlngs, {color:'green'}).addTo(layerStrips);
+        stripSegments++;
 
         const segLength_km = turf.length(seg, {units:'kilometers'});
         const segLength_m = segLength_km*1000;
+        totalStripLengthKm += segLength_km;
         if(segLength_m < 1) return;
         const stepCount = Math.floor(segLength_m / photoSpacing);
         for(let s=0;s<=stepCount;s++){
@@ -342,11 +550,89 @@ calcBtn.onclick = () => {
           const coords = ptBack.geometry.coordinates; // [lng,lat]
           if(turf.booleanPointInPolygon(ptBack, poly)){
             L.circleMarker([coords[1], coords[0]], {radius:3, color:'red'}).addTo(layerPhotos);
+            totalPhotos++;
           }
         }
       }
     });
+    if(stripSegments > 0) actualStripCount++;
   }
+
+  // Validation check: compare calculated vs actual strips
+  // Only show warning if there's a significant discrepancy (>2 strips difference)
+  let stripWarning = '';
+  const stripDiff = Math.abs(actualStripCount - numStrips);
+  if (stripDiff > 2) {
+    stripWarning = `<div class=\"warning\">Hinweis: Berechnete Streifen (${numStrips}) wurden auf tatsächliche (${actualStripCount}) korrigiert</div>`;
+  }
+  // Always use actual count for summary to be accurate
+  numStrips = actualStripCount;
+
+  // Calculate summary stats
+  const areaHa = turf.area(poly) / 10000; // hectares
+  const estFlightTimeMin = (totalStripLengthKm / 0.6) * 60; // assuming 10 m/s = 0.6 km/min
+
+  summaryStats = {
+    areaHa: areaHa.toFixed(2),
+    numStrips: numStrips,
+    numPhotos: totalPhotos,
+    totalLengthKm: totalStripLengthKm.toFixed(2),
+    estTimeMin: Math.ceil(estFlightTimeMin)
+  };
+
+  // Render summary table with formatted numbers for German locale
+  try {
+    summaryTable.innerHTML = `
+      <tr><td>${t('summaryArea')}</td><td>${formatNumberDE(parseFloat(summaryStats.areaHa))} ha</td></tr>
+      <tr><td>${t('summaryStrips')}</td><td>${summaryStats.numStrips}</td></tr>
+      <tr><td>${t('summaryPhotos')}</td><td>${summaryStats.numPhotos}</td></tr>
+      <tr><td>${t('summaryLength')}</td><td>${formatNumberDE(parseFloat(summaryStats.totalLengthKm))} km</td></tr>
+      <tr><td>${t('summaryTime')}</td><td>${summaryStats.estTimeMin} min</td></tr>
+    `;
+  } catch (error) {
+    console.error('Error rendering summary table:', error);
+    summaryTable.innerHTML = `
+      <tr><td colspan="2">Error rendering summary: ${error.message}</td></tr>
+    `;
+  }
+  
+  // Always show summary div
+  summaryDiv.style.display = 'block';
+  
+  // Show warning if strip count mismatch
+  if (stripWarning) {
+    document.getElementById('summaryWarning').innerHTML = stripWarning;
+  } else {
+    document.getElementById('summaryWarning').innerHTML = '';
+  }
+};
+
+// Export functions
+exportCsvBtn.onclick = () => {
+  const csv = `Key,Value\nArea (ha),${summaryStats.areaHa}\nStrips,${summaryStats.numStrips}\nPhotos,${summaryStats.numPhotos}\nLength (km),${summaryStats.totalLengthKm}\nTime (min),${summaryStats.estTimeMin}`;
+  const blob = new Blob([csv], {type: 'text/csv'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'drone-plan-summary.csv';
+  a.click();
+  URL.revokeObjectURL(url);
+};
+
+exportJsonBtn.onclick = () => {
+  const json = JSON.stringify(summaryStats, null, 2);
+  const blob = new Blob([json], {type: 'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'drone-plan-summary.json';
+  a.click();
+  URL.revokeObjectURL(url);
+};
+
+// Language toggle
+document.getElementById('langToggle').onclick = () => {
+  setLanguage(currentLang === 'de' ? 'en' : 'de');
 };
 
 // initial check
