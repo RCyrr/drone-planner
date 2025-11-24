@@ -44,7 +44,7 @@ export function generateKml(pointsToExport = [], stripElevations = {}, options =
       <color>ff0000ff</color>
       <scale>0.5</scale>
       <Icon>
-        <href>http://maps.google.com/mapfiles/kml/shapes/placemark_circle.png</href>
+        <href>https://maps.google.com/mapfiles/kml/shapes/placemark_circle.png</href>
       </Icon>
     </IconStyle>
   </Style>
@@ -56,7 +56,7 @@ export function generateKml(pointsToExport = [], stripElevations = {}, options =
     if (!Array.isArray(stripPoints) || stripPoints.length === 0) continue;
 
     const coordsStr = stripPoints.map((p) => {
-      const alt = (typeof p.absoluteAltitude === 'number' && !isNaN(p.absoluteAltitude)) ? p.absoluteAltitude.toFixed(2) : 0;
+      const alt = (typeof p.absoluteAltitude === 'number' && !isNaN(p.absoluteAltitude)) ? p.absoluteAltitude.toFixed(2) : '0';
       return `${p.lng},${p.lat},${alt}`;
     }).join(' ');
 
@@ -75,15 +75,15 @@ export function generateKml(pointsToExport = [], stripElevations = {}, options =
 
   // Add photo points
   pointsToExport.forEach((pt, idx) => {
-    const alt = (typeof pt.absoluteAltitude === 'number' && !isNaN(pt.absoluteAltitude)) ? pt.absoluteAltitude.toFixed(2) : 0;
+    const alt = (typeof pt.absoluteAltitude === 'number' && !isNaN(pt.absoluteAltitude)) ? pt.absoluteAltitude.toFixed(2) : '0';
     kml += `
   <Placemark>
     <name>Photo ${idx + 1}</name>
     <styleUrl>#photoStyle</styleUrl>
     <Point>
-      <coordinates>${pt.lng},${pt.lat},${alt}</coordinates>
       <altitudeMode>absolute</altitudeMode>
       <extrude>0</extrude>
+      <coordinates>${pt.lng},${pt.lat},${alt}</coordinates>
     </Point>
   </Placemark>
 `;
@@ -137,5 +137,5 @@ function escapeXml(str) {
     .replace(/</g, '<')
     .replace(/>/g, '>')
     .replace(/"/g, '"')
-    .replace(/'/g, "'");
+    .replace(/'/g, ''');
 }

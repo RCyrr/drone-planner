@@ -32,6 +32,21 @@ button{margin-top:.5rem; padding:.5rem 1rem;}
   #langToggle { position:absolute; top:1rem; right:1rem; }
 }
 </style>
+  <!-- Tailwind CSS (CDN) + config for class-based dark mode -->
+  <script>
+    window.tailwind = window.tailwind || {};
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            accent: '#2563eb' /* blue-600 */
+          }
+        }
+      }
+    }
+  </script>
+  <script src="https://cdn.tailwindcss.com"></script>
   <!-- ES Modules (load early to avoid undefined when handlers fire) -->
   <script type="module">
     import { fetchElevationsBatch, addElevationData } from './src/elevation.js';
@@ -52,63 +67,161 @@ button{margin-top:.5rem; padding:.5rem 1rem;}
   </script>
 </head>
 <body>
-<div id="sidebar">
-  <h2>Drone Planner <button id="langToggle">EN</button></h2>
-  <h3 id="section1">1. Bild / Drohne</h3>
-  <input type="file" id="imageInput" accept="image/jpeg" />
-  <label id="labelDrone">Drohne:</label>
-  <select id="droneSelect">
-    <option value="" disabled selected>Drohne wählen...</option>
-    <option value="DJI Mini 4 Pro">DJI Mini 4 Pro</option>
-    <option value="DJI Air 3">DJI Air 3</option>
-    <option value="DJI Mavic 3E">DJI Mavic 3E</option>
-    <option value="DJI Mavic 4E">DJI Mavic 4E</option>
-    <option value="DJI Mini 3 Pro">DJI Mini 3 Pro</option>
-    <option value="DJI Matrice 300 RTK">DJI Matrice 300 RTK</option>
-    <option value="DJI Phantom 4 RTK">DJI Phantom 4 RTK</option>
-    <option value="DJI Matrice 350 RTK">DJI Matrice 350 RTK</option>
-    <option value="custom">Custom Drone...</option>
-  </select>
-  <label id="labelFocal">Brennweite [mm]:</label>
-  <input type="number" id="focalLength" placeholder="Wird automatisch gesetzt" />
-  <label id="labelPixel">Pixelgröße [µm]:</label>
-  <input type="number" id="pixelSize" placeholder="Wird automatisch gesetzt" />
-  <div id="exifOutput" class="output"></div>
-  <div id="droneNote" class="small"></div>
-  <h3 id="section2">2. Flugplanung</h3>
-  <p id="polygonDraw">Polygon zeichnen:</p>
-  <button id="drawPolygonBtn">Polygon zeichnen</button>
-  <button id="clearPolygonBtn">Polygon löschen</button>
-  <label id="labelShapefile">Shapefile importieren:</label>
-  <input type="file" id="shapefileInput" accept=".shp" />
-  <label id="labelDirection">Flugrichtung [° 0=Nord, 90=Ost]:</label>
-  <input type="number" id="flightDirection" value="0" min="0" max="359" />
-  <label id="labelGsd">GSD [cm/pixel]:</label>
-  <input type="number" id="gsd" value="2" min="0.1" step="0.1" />
-  <label id="labelHeight">Flughöhe [m]:</label>
-  <input type="number" id="height" value="50" min="1" step="1" />
-  <label id="labelFrontlap">Längsüberlappung [%]:</label>
-  <input type="number" id="frontlap" value="70" min="0" max="99" />
-  <label id="labelSidelap">Querüberlappung [%]:</label>
-  <input type="number" id="sidelap" value="60" min="0" max="99" />
-  <button id="calcStrips" disabled>Flugstreifen berechnen</button>
-  <div id="stripOutput" class="output"></div>
-  <div id="summary" style="display:none;">
-    <h3 id="summaryTitle">Zusammenfassung</h3>
-    <div id="summaryWarning" class="warning"></div>
-    <table id="summaryTable"></table>
-    <button id="exportCsv" class="export-btn">CSV Export</button>
-    <button id="exportJson" class="export-btn">JSON Export</button>
+<div id="sidebar" class="bg-white dark:bg-gray-800 p-4 overflow-y-auto">
+  <div class="flex items-center justify-between mb-3">
+    <h2 class="text-lg font-semibold text-gray-800 dark:text-gray-100">Drone Planner</h2>
+    <div class="flex items-center space-x-2">
+      <button id="langToggle" class="px-2 py-1 text-sm rounded bg-gray-200 dark:bg-gray-700">EN</button>
+      <button id="darkToggle" class="px-2 py-1 text-sm rounded bg-gray-200 dark:bg-gray-700" title="Toggle theme">🌙</button>
+    </div>
   </div>
-  <div id="photoFilter" style="display:none; margin-top:1rem;">
-    <h4>Fotopunkte filtern:</h4>
-    <label>Anzahl Punkte am Anfang/Ende behalten:</label>
-    <input type="number" id="filterCount" value="3" min="0" max="50" />
-    <button id="applyFilterBtn">Filter anwenden</button>
-    <button id="resetFilterBtn">Filter zurücksetzen</button>
+
+  <!-- Tabs -->
+  <div class="mb-3">
+    <nav class="flex space-x-1" role="tablist" aria-label="Sidebar tabs">
+      <button class="tab-btn px-3 py-1 rounded-md text-sm font-medium bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-100" data-tab="tab-image">Image / Drone</button>
+      <button class="tab-btn px-3 py-1 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700" data-tab="tab-flight">Flight Planning</button>
+      <button class="tab-btn px-3 py-1 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700" data-tab="tab-filter">Photo Filter</button>
+      <button class="tab-btn px-3 py-1 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700" data-tab="tab-export">Export</button>
+    </nav>
   </div>
-  <button id="exportKmlBtn" class="export-btn" style="display:none;">KML Export</button>
-  <div id="loadingElevation" style="display:none; margin-top:1rem; font-weight:bold;">Loading elevation data...</div>
+
+  <!-- Panels -->
+  <div id="tab-image" class="tab-panel space-y-2">
+    <h3 id="section1" class="text-sm font-semibold text-gray-700 dark:text-gray-200">1. Image / Drone</h3>
+    <input type="file" id="imageInput" accept="image/jpeg" class="w-full" />
+    <label id="labelDrone" class="block mt-2 text-sm text-gray-600 dark:text-gray-300">Drohne:</label>
+    <select id="droneSelect" class="w-full mt-1 p-2 rounded border">
+      <option value="" disabled selected>Drohne wählen...</option>
+      <option value="DJI Mini 4 Pro">DJI Mini 4 Pro</option>
+      <option value="DJI Air 3">DJI Air 3</option>
+      <option value="DJI Mavic 3E">DJI Mavic 3E</option>
+      <option value="DJI Mavic 4E">DJI Mavic 4E</option>
+      <option value="DJI Mini 3 Pro">DJI Mini 3 Pro</option>
+      <option value="DJI Matrice 300 RTK">DJI Matrice 300 RTK</option>
+      <option value="DJI Phantom 4 RTK">DJI Phantom 4 RTK</option>
+      <option value="DJI Matrice 350 RTK">DJI Matrice 350 RTK</option>
+      <option value="custom">Custom Drone...</option>
+    </select>
+
+    <label id="labelFocal" class="block mt-2 text-sm text-gray-600 dark:text-gray-300">Brennweite [mm]:</label>
+    <input type="number" id="focalLength" placeholder="Wird automatisch gesetzt" class="w-full p-2 rounded border"/>
+
+    <label id="labelPixel" class="block mt-2 text-sm text-gray-600 dark:text-gray-300">Pixelgröße [µm]:</label>
+    <input type="number" id="pixelSize" placeholder="Wird automatisch gesetzt" class="w-full p-2 rounded border"/>
+
+    <div id="exifOutput" class="output bg-gray-50 dark:bg-gray-700 p-2 rounded text-sm"></div>
+    <div id="droneNote" class="small text-xs text-gray-500 dark:text-gray-400"></div>
+  </div>
+
+  <div id="tab-flight" class="tab-panel hidden space-y-2">
+    <h3 id="section2" class="text-sm font-semibold text-gray-700 dark:text-gray-200">2. Flight Planning</h3>
+    <p id="polygonDraw" class="text-sm text-gray-600 dark:text-gray-300">Polygon zeichnen:</p>
+    <div class="flex space-x-2">
+      <button id="drawPolygonBtn" class="px-3 py-1 rounded bg-accent text-white">Polygon zeichnen</button>
+      <button id="clearPolygonBtn" class="px-3 py-1 rounded border">Polygon löschen</button>
+    </div>
+
+    <label id="labelShapefile" class="block mt-2 text-sm text-gray-600 dark:text-gray-300">Shapefile importieren:</label>
+    <input type="file" id="shapefileInput" accept=".shp" class="w-full" />
+
+    <label id="labelDirection" class="block mt-2 text-sm text-gray-600 dark:text-gray-300">Flugrichtung [° 0=Nord, 90=Ost]:</label>
+    <input type="number" id="flightDirection" value="0" min="0" max="359" class="w-full p-2 rounded border"/>
+
+    <label id="labelGsd" class="block mt-2 text-sm text-gray-600 dark:text-gray-300">GSD [cm/pixel]:</label>
+    <input type="number" id="gsd" value="2" min="0.1" step="0.1" class="w-full p-2 rounded border"/>
+
+    <label id="labelHeight" class="block mt-2 text-sm text-gray-600 dark:text-gray-300">Flughöhe [m]:</label>
+    <input type="number" id="height" value="50" min="1" step="1" class="w-full p-2 rounded border"/>
+
+    <div class="grid grid-cols-2 gap-2">
+      <div>
+        <label id="labelFrontlap" class="block mt-2 text-sm text-gray-600 dark:text-gray-300">Längsüberlappung [%]:</label>
+        <input type="number" id="frontlap" value="70" min="0" max="99" class="w-full p-2 rounded border"/>
+      </div>
+      <div>
+        <label id="labelSidelap" class="block mt-2 text-sm text-gray-600 dark:text-gray-300">Querüberlappung [%]:</label>
+        <input type="number" id="sidelap" value="60" min="0" max="99" class="w-full p-2 rounded border"/>
+      </div>
+    </div>
+
+    <button id="calcStrips" disabled class="w-full mt-2 px-3 py-2 rounded bg-green-600 text-white">Flugstreifen berechnen</button>
+    <div id="stripOutput" class="output bg-gray-50 dark:bg-gray-700 p-2 rounded text-sm"></div>
+
+    <div id="summary" class="hidden mt-2 bg-gray-50 dark:bg-gray-700 p-2 rounded">
+      <h3 id="summaryTitle" class="font-semibold text-sm text-gray-700 dark:text-gray-200">Zusammenfassung</h3>
+      <div id="summaryWarning" class="warning text-red-600"></div>
+      <table id="summaryTable" class="w-full text-sm mt-1"></table>
+      <div class="flex space-x-2 mt-2">
+        <button id="exportCsv" class="export-btn px-3 py-1 rounded border">CSV Export</button>
+        <button id="exportJson" class="export-btn px-3 py-1 rounded border">JSON Export</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="tab-filter" class="tab-panel hidden space-y-2">
+    <h4 class="text-sm font-semibold text-gray-700 dark:text-gray-200">Fotopunkte filtern:</h4>
+    <label for="filterCount" class="text-sm text-gray-600 dark:text-gray-300">Anzahl Punkte am Anfang/Ende behalten:</label>
+    <input type="number" id="filterCount" value="3" min="0" max="50" class="w-full p-2 rounded border"/>
+    <div class="flex space-x-2">
+      <button id="applyFilterBtn" class="px-3 py-1 rounded bg-accent text-white">Filter anwenden</button>
+      <button id="resetFilterBtn" class="px-3 py-1 rounded border">Filter zurücksetzen</button>
+    </div>
+  </div>
+
+  <div id="tab-export" class="tab-panel hidden space-y-2">
+    <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-200">Export</h3>
+    <div class="flex flex-col space-y-2">
+      <button id="exportKmlBtn" class="export-btn px-3 py-1 rounded bg-indigo-600 text-white hidden">KML Export</button>
+      <button id="exportCsvBtnTop" class="export-btn px-3 py-1 rounded border">CSV Export</button>
+      <button id="exportJsonBtnTop" class="export-btn px-3 py-1 rounded border">JSON Export</button>
+    </div>
+    <div id="loadingElevation" class="hidden mt-2 font-semibold text-sm">Loading elevation data...</div>
+  </div>
+
+  <!-- Tab + theme script -->
+  <script>
+    (function(){
+      const tabs = document.querySelectorAll('.tab-btn');
+      const panels = document.querySelectorAll('.tab-panel');
+      function activate(tabId){
+        panels.forEach(p => p.id === tabId ? p.classList.remove('hidden') : p.classList.add('hidden'));
+        tabs.forEach(b => b.classList.toggle('bg-gray-100', b.dataset.tab === tabId));
+      }
+      // default
+      activate('tab-image');
+
+      tabs.forEach(btn => {
+        btn.addEventListener('click', ()=> activate(btn.dataset.tab));
+      });
+
+      // Dark mode toggle
+      const darkBtn = document.getElementById('darkToggle');
+      darkBtn.addEventListener('click', ()=>{
+        const html = document.documentElement;
+        html.classList.toggle('dark');
+        darkBtn.textContent = html.classList.contains('dark') ? '☀️' : '🌙';
+      });
+
+      // Mirror top export buttons to existing handlers (keep existing IDs functioning)
+      const exportCsvTop = document.getElementById('exportCsvBtnTop');
+      const exportJsonTop = document.getElementById('exportJsonBtnTop');
+      if(exportCsvTop){
+        exportCsvTop.addEventListener('click', ()=> {
+          const ev = new Event('click');
+          const btn = document.getElementById('exportCsv');
+          if(btn) btn.dispatchEvent(ev);
+        });
+      }
+      if(exportJsonTop){
+        exportJsonTop.addEventListener('click', ()=> {
+          const ev = new Event('click');
+          const btn = document.getElementById('exportJson');
+          if(btn) btn.dispatchEvent(ev);
+        });
+      }
+    })();
+  </script>
 </div>
 <div id="map"></div>
 
@@ -301,7 +414,8 @@ const summaryTable = document.getElementById('summaryTable');
 const exportCsvBtn = document.getElementById('exportCsv');
 const exportJsonBtn = document.getElementById('exportJson');
 const shapefileInput = document.getElementById('shapefileInput');
-const photoFilterDiv = document.getElementById('photoFilter');
+// The photo filter panel moved into the tabbed UI. Use fallback to support both IDs.
+const photoFilterDiv = document.getElementById('photoFilter') || document.getElementById('tab-filter');
 const filterCountInput = document.getElementById('filterCount');
 const applyFilterBtn = document.getElementById('applyFilterBtn');
 const resetFilterBtn = document.getElementById('resetFilterBtn');
@@ -618,9 +732,18 @@ calcBtn.onclick = async () => {
     `;
 
     // Show UI controls
-    summaryDiv.style.display = 'block';
-    photoFilterDiv.style.display = 'block';
-    exportKmlBtn.style.display = 'inline-block';
+    if (summaryDiv) {
+      summaryDiv.classList.remove('hidden');
+      summaryDiv.style.display = 'block';
+    }
+    // For tabbed UI: only force-display legacy photoFilter panel (if present).
+    if (photoFilterDiv && photoFilterDiv.id === 'photoFilter') {
+      photoFilterDiv.style.display = 'block';
+    }
+    if (exportKmlBtn) {
+      exportKmlBtn.classList.remove('hidden');
+      exportKmlBtn.style.display = 'inline-block';
+    }
 
     // Fetch elevations asynchronously and apply (use module-bound function)
     if (!window.addElevationData) {

@@ -26,6 +26,21 @@ export async function fetchElevationsBatch(points) {
     loadingDiv.style.display = 'block';
   }
 
+  const TIMEOUT_MS = 12000; // per-batch timeout (12s)
+  const ENDPOINT = 'https://api.open-elevation.com/api/v1/lookup';
+
+  const fetchJsonWithTimeout = async (url, options, timeoutMs) => {
+    const ctrl = new AbortController();
+    const to = setTimeout(() => ctrl.abort('timeout'), timeoutMs);
+    try {
+      const res = await fetch(url, { ...options, signal: ctrl.signal });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return await res.json();
+    } finally {
+      clearTimeout(to);
+    }
+  };
+
   try {
     // Filter invalid points (must be numeric lat/lng)
     const validPoints = points.filter(
@@ -35,43 +50,47 @@ export async function fetchElevationsBatch(points) {
       console.warn('Some invalid points were filtered out:', points.length - validPoints.length);
     }
 
-    const batchSize = 1000; // safe limit for Open Elevation
+    const batchSize = 500; // conservative limit for Open Elevation
     const allElevations = [];
+    const total = validPoints.length;
 
-    for (let i = 0; i < validPoints.length; i += batchSize) {
+    for (let i = 0; i < total; i += batchSize) {
       const batch = validPoints.slice(i, i + batchSize);
       const locations = batch.map((p) => ({ latitude: p.lat, longitude: p.lng }));
 
-      console.log('Sending to Open Elevation:', JSON.stringify({ locations }));
-
-      const response = await fetch('https://api.open-elevation.com/api/v1/lookup', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Accept: 'application/json'
-        },
-        body: JSON.stringify({ locations })
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const data = await response.json();
-      console.log('Open Elevation response:', data);
-
-      if (data && Array.isArray(data.results)) {
-        allElevations.push(
-          ...data.results.map((r) => ((typeof r.elevation === 'number' && !isNaN(r.elevation)) ? r.elevation : 0))
+      try {
+        const data = await fetchJsonWithTimeout(
+          ENDPOINT,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json'
+            },
+            body: JSON.stringify({ locations })
+          },
+          TIMEOUT_MS
         );
-      } else {
-        console.error('Unexpected results from Open Elevation:', data);
+
+        if (data && Array.isArray(data.results)) {
+          allElevations.push(
+            ...data.results.map((r) =>
+              (typeof r.elevation === 'number' && !isNaN(r.elevation)) ? r.elevation : 0
+            )
+          );
+        } else {
+          console.error('Unexpected results from Open Elevation:', data);
+          allElevations.push(...new Array(batch.length).fill(0));
+        }
+      } catch (err) {
+        console.error('Batch elevation request failed, using zeros for this batch:', err);
         allElevations.push(...new Array(batch.length).fill(0));
       }
 
       if (loadingDiv) {
-        const progress = Math.min(((i + batchSize) / validPoints.length) * 100, 100);
-        loadingDiv.textContent = `Loading elevation data... ${Math.round(progress)}%`;
+        const processed = Math.min(i + batchSize, total);
+        const progress = Math.round((processed / total) * 100);
+        loadingDiv.textContent = `Loading elevation data... ${processed}/${total} (${progress}%)`;
       }
     }
 
