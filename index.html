@@ -568,7 +568,13 @@ calcBtn.onclick = async () => {
   // Convert the Leaflet polygon to GeoJSON polygon to pass to the module
   const polygonGeoJSON = polygon.toGeoJSON().geometry;
   try {
-    const result = calculateStripsModule(polygonGeoJSON, drone, options);
+    // Ensure module binding exists (dynamic import fallback in case head bootstrap failed)
+    if (!window.calculateStripsModule) {
+      const mod = await import('./src/strips.js');
+      window.calculateStripsModule = mod.calculateStrips;
+      console.log('Loaded strips module dynamically as fallback');
+    }
+    const result = window.calculateStripsModule(polygonGeoJSON, drone, options);
     const { photoPoints, stripLines, summaryStats: newSummary } = result;
 
     // Render strips returned (stripLines are arrays of [lng,lat] points)
@@ -616,8 +622,8 @@ calcBtn.onclick = async () => {
     photoFilterDiv.style.display = 'block';
     exportKmlBtn.style.display = 'inline-block';
 
-    // Fetch elevations asynchronously and apply
-    await addElevationData();
+    // Fetch elevations asynchronously and apply (use module-bound function)
+    await window.addElevationData();
 
   } catch (err) {
     console.error('Error calculating strips:', err);
@@ -725,198 +731,8 @@ document.getElementById('langToggle').onclick = () => {
 };
 
 // initial check
-async function fetchElevationsBatch(points) {
-  if (!points || points.length === 0) return [];
-  
-  // Defensive: create if missing
-  let loadingDiv = document.getElementById('loadingElevation');
-  if (!loadingDiv) {
-    loadingDiv = document.createElement("div");
-    loadingDiv.id = "loadingElevation";
-    loadingDiv.style.display = "block";
-    loadingDiv.style.marginTop = "1rem";
-    loadingDiv.style.fontWeight = "bold";
-    loadingDiv.textContent = "Loading elevation data...";
-    const sidebar = document.getElementById("sidebar");
-    if (sidebar) sidebar.appendChild(loadingDiv);
-    else document.body.appendChild(loadingDiv);
-    console.warn("loadingElevation div was missing, created on-the-fly!");
-  } else {
-    loadingDiv.style.display = 'block';
-  }
-
-  try {
-    // Remove invalid points
-    const validPoints = points.filter(
-      (p) => typeof p.lat === "number" && typeof p.lng === "number" && !isNaN(p.lat) && !isNaN(p.lng)
-    );
-    if (validPoints.length !== points.length) {
-      console.warn("Some invalid points were filtered out:", points.length - validPoints.length);
-    }
-
-    const batchSize = 1000;
-    const allElevations = [];
-
-    for (let i = 0; i < validPoints.length; i += batchSize) {
-      const batch = validPoints.slice(i, i + batchSize);
-      const locations = batch.map(p => ({ latitude: p.lat, longitude: p.lng }));
-
-      // Log payload being sent
-      console.log("Sending to Open Elevation:", JSON.stringify({ locations }));
-
-      const response = await fetch('https://api.open-elevation.com/api/v1/lookup', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        },
-        body: JSON.stringify({ locations })
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const data = await response.json();
-      console.log("Open Elevation response:", data);
-
-      if (data && Array.isArray(data.results)) {
-        allElevations.push(...data.results.map(r => (
-          (typeof r.elevation === "number" && !isNaN(r.elevation)) ? r.elevation : 0
-        )));
-      } else {
-        console.error("Unexpected results from Open Elevation:", data);
-        allElevations.push(...new Array(batch.length).fill(0));
-      }
-
-      // Update progress text
-      if (loadingDiv) {
-        const progress = Math.min(((i + batchSize) / validPoints.length) * 100, 100);
-        loadingDiv.textContent = `Loading elevation data... ${Math.round(progress)}%`;
-      }
-    }
-
-    if (loadingDiv) loadingDiv.style.display = 'none';
-
-    // Return elevations aligned with input order (fallback to 0 for skipped)
-    if (validPoints.length !== points.length) {
-      // Create a map to assign elevations back to original point indices
-      let elevationIdx = 0;
-      const elevations = points.map((pt) => {
-        if (
-          typeof pt.lat === "number" && typeof pt.lng === "number" &&
-          !isNaN(pt.lat) && !isNaN(pt.lng)
-        ) {
-          return allElevations[elevationIdx++];
-        } else {
-          return 0;
-        }
-      });
-      console.log("Final elevations array:", elevations);
-      return elevations;
-    } else {
-      console.log("Final elevations array:", allElevations);
-      return allElevations;
-    }
-  } catch (error) {
-    console.error('Error fetching elevations:', error);
-    if (loadingDiv) loadingDiv.style.display = 'none';
-    return new Array(points.length).fill(0);
-  }
-}
-// Add elevation data to photo points and strips
-async function addElevationData() {
-  if (!allPhotoPoints || allPhotoPoints.length === 0) return;
-  
-  // Collect all unique points (photo points and strip vertices)
-  const pointsToFetch = [];
-  const pointIndexMap = new Map(); // Map to track which elevation belongs to which point
-  
-  // Add photo points
-  allPhotoPoints.forEach((pt, idx) => {
-    pointsToFetch.push({ lat: pt.lat, lng: pt.lng, type: 'photo', index: idx });
-  });
-  
-  // Add strip vertices
-  layerStrips.eachLayer(layer => {
-    if (layer instanceof L.Polyline) {
-      const latlngs = layer.getLatLngs();
-      latlngs.forEach((ll, idx) => {
-        pointsToFetch.push({ lat: ll.lat, lng: ll.lng, type: 'strip', layerId: L.stamp(layer), index: idx });
-      });
-    }
-  });
-  
-  console.log("Points to fetch elevation for:", pointsToFetch);
-  
-  // Fetch elevations for all points
-  const elevations = await fetchElevationsBatch(pointsToFetch);
-  
-  console.log("Elevations returned:", elevations);
-  
-  // Apply elevations to photo points
-  allPhotoPoints.forEach((pt, idx) => {
-    const elevation = elevations[idx] || 0;
-    const flightHeight = parseFloat(heightInput.value) || 0;
-    pt.elevation = elevation;
-    pt.absoluteAltitude = elevation + flightHeight;
-    console.log(`Photo point ${idx}: elevation=${elevation}, flightHeight=${flightHeight}, absoluteAltitude=${pt.absoluteAltitude}`);
-  });
-  
-  // Apply elevations to filtered points as well
-  if (filteredPhotoPoints.length > 0) {
-    filteredPhotoPoints.forEach(pt => {
-      const originalPoint = allPhotoPoints.find(p => p.lat === pt.lat && p.lng === pt.lng);
-      if (originalPoint) {
-        pt.elevation = originalPoint.elevation;
-        pt.absoluteAltitude = originalPoint.absoluteAltitude;
-      }
-    });
-  }
-  
-  // Store strip elevations for KML export
-  window.stripElevations = {};
-  let elevationIndex = allPhotoPoints.length; // Start after photo points
-  
-  layerStrips.eachLayer(layer => {
-    if (layer instanceof L.Polyline) {
-      const layerId = L.stamp(layer);
-      const latlngs = layer.getLatLngs();
-      const stripPoints = latlngs.map((ll, idx) => {
-        const elevation = elevations[elevationIndex + idx] || 0;
-        const flightHeight = parseFloat(heightInput.value) || 0;
-        return {
-          lat: ll.lat,
-          lng: ll.lng,
-          elevation: elevation,
-          absoluteAltitude: elevation + flightHeight
-        };
-      });
-      window.stripElevations[layerId] = stripPoints;
-      console.log(`Strip ${layerId} points with elevation:`, stripPoints);
-      elevationIndex += latlngs.length;
-    }
-  });
-}
 checkReady();
 </script>
 </body>
 </html>
 
-<script type="module">
-  import { fetchElevationsBatch, addElevationData } from './src/elevation.js';
-  import { generateKml, exportKml as exportKmlModule } from './src/kml.js';
-  import { calculateStrips } from './src/strips.js';
-  import { initMap, bindUI } from './src/map.js';
-
-  // Expose module functions to window for incremental integration with existing inline code
-  window.fetchElevationsBatch = fetchElevationsBatch;
-  window.addElevationData = addElevationData;
-  window.generateKml = generateKml;
-  window.exportKmlModule = exportKmlModule;
-  window.calculateStripsModule = calculateStrips;
-  window.initMapModule = initMap;
-  window.bindUI = bindUI;
-
-  console.log('Modules loaded: elevation, kml, strips, map');
-</script>
