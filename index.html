@@ -82,6 +82,14 @@ button{margin-top:.5rem; padding:.5rem 1rem;}
     <button id="exportCsv" class="export-btn">CSV Export</button>
     <button id="exportJson" class="export-btn">JSON Export</button>
   </div>
+  <div id="photoFilter" style="display:none; margin-top:1rem;">
+    <h4>Fotopunkte filtern:</h4>
+    <label>Anzahl Punkte am Anfang/Ende behalten:</label>
+    <input type="number" id="filterCount" value="3" min="0" max="50" />
+    <button id="applyFilterBtn">Filter anwenden</button>
+    <button id="resetFilterBtn">Filter zurücksetzen</button>
+  </div>
+  <button id="exportKmlBtn" class="export-btn" style="display:none;">KML Export</button>
 </div>
 <div id="map"></div>
 
@@ -138,7 +146,12 @@ const TRANSLATIONS = {
     summaryLength: 'Gesamtlänge',
     summaryTime: 'Geschätzte Flugzeit',
     exportCsv: 'CSV Export',
-    exportJson: 'JSON Export'
+    exportJson: 'JSON Export',
+    photoFilterTitle: 'Fotopunkte filtern:',
+    photoFilterLabel: 'Anzahl Punkte am Anfang/Ende behalten:',
+    applyFilter: 'Filter anwenden',
+    resetFilter: 'Filter zurücksetzen',
+    exportKml: 'KML Export'
   },
   en: {
     title: 'Drone Planner – GitHub Pages Optimized',
@@ -172,7 +185,12 @@ const TRANSLATIONS = {
     summaryLength: 'Total Length',
     summaryTime: 'Estimated Flight Time',
     exportCsv: 'Export CSV',
-    exportJson: 'Export JSON'
+    exportJson: 'Export JSON',
+    photoFilterTitle: 'Filter Photo Points:',
+    photoFilterLabel: 'Points to keep at start/end:',
+    applyFilter: 'Apply Filter',
+    resetFilter: 'Reset Filter',
+    exportKml: 'Export KML'
   }
 };
 
@@ -204,6 +222,14 @@ function setLanguage(lang) {
   document.getElementById('summaryTitle').textContent = t('summaryTitle');
   document.getElementById('exportCsv').textContent = t('exportCsv');
   document.getElementById('exportJson').textContent = t('exportJson');
+  // Update photo filter UI texts
+  const photoFilterTitle = photoFilterDiv.querySelector('h4');
+  if (photoFilterTitle) photoFilterTitle.textContent = t('photoFilterTitle');
+  const filterLabel = document.querySelector('label[for="filterCount"]');
+  if (filterLabel) filterLabel.textContent = t('photoFilterLabel');
+  document.getElementById('applyFilterBtn').textContent = t('applyFilter');
+  document.getElementById('resetFilterBtn').textContent = t('resetFilter');
+  document.getElementById('exportKmlBtn').textContent = t('exportKml');
 }
 
 const map = L.map('map').setView([48.137,11.575],13);
@@ -241,6 +267,11 @@ const summaryTable = document.getElementById('summaryTable');
 const exportCsvBtn = document.getElementById('exportCsv');
 const exportJsonBtn = document.getElementById('exportJson');
 const shapefileInput = document.getElementById('shapefileInput');
+const photoFilterDiv = document.getElementById('photoFilter');
+const filterCountInput = document.getElementById('filterCount');
+const applyFilterBtn = document.getElementById('applyFilterBtn');
+const resetFilterBtn = document.getElementById('resetFilterBtn');
+const exportKmlBtn = document.getElementById('exportKmlBtn');
 
 // init state
 pixelInput.readOnly = true;
@@ -518,8 +549,11 @@ calcBtn.onclick = () => {
 
   let totalPhotos = 0;
   let totalStripLengthKm = 0;
-
   let actualStripCount = 0; // Track actual strips drawn
+  
+  // Reset photo points storage
+  allPhotoPoints = [];
+  filteredPhotoPoints = [];
   
   for(let i=0;i<numStrips;i++){
     const offset_m = i*stripSpacing;
@@ -530,6 +564,8 @@ calcBtn.onclick = () => {
 
     const split = turf.lineSplit(line, rotatedPoly);
     let stripSegments = 0;
+    let pointIndexInStrip = 0;
+    
     split.features.forEach(seg=>{
       const segMid = turf.midpoint(turf.point(seg.geometry.coordinates[0]), turf.point(seg.geometry.coordinates[seg.geometry.coordinates.length-1]));
       if(turf.booleanPointInPolygon(segMid, rotatedPoly)){
@@ -549,8 +585,18 @@ calcBtn.onclick = () => {
           const ptBack = turf.transformRotate(ptOnSeg, dir, { pivot: centroid });
           const coords = ptBack.geometry.coordinates; // [lng,lat]
           if(turf.booleanPointInPolygon(ptBack, poly)){
-            L.circleMarker([coords[1], coords[0]], {radius:3, color:'red'}).addTo(layerPhotos);
+            const marker = L.circleMarker([coords[1], coords[0]], {radius:3, color:'red'}).addTo(layerPhotos);
             totalPhotos++;
+            
+            // Store photo point with metadata for filtering
+            allPhotoPoints.push({
+              lat: coords[1],
+              lng: coords[0],
+              stripIndex: actualStripCount,
+              pointIndex: pointIndexInStrip,
+              marker: marker
+            });
+            pointIndexInStrip++;
           }
         }
       }
@@ -605,6 +651,72 @@ calcBtn.onclick = () => {
   } else {
     document.getElementById('summaryWarning').innerHTML = '';
   }
+  
+  // Show photo filter controls
+  photoFilterDiv.style.display = 'block';
+  exportKmlBtn.style.display = 'inline-block';
+};
+
+// Store all photo points for filtering
+let allPhotoPoints = [];
+let filteredPhotoPoints = [];
+
+// Photo point filtering
+function applyPhotoFilter() {
+  const keepCount = parseInt(filterCountInput.value) || 0;
+  if (keepCount === 0) {
+    // Reset to show all points
+    layerPhotos.clearLayers();
+    allPhotoPoints.forEach(pt => {
+      L.circleMarker([pt.lat, pt.lng], {radius: 3, color: 'red'}).addTo(layerPhotos);
+    });
+    filteredPhotoPoints = [...allPhotoPoints];
+    return;
+  }
+  
+  // Clear current photo points
+  layerPhotos.clearLayers();
+  filteredPhotoPoints = [];
+  
+  // Group points by strip (based on proximity and order)
+  const stripGroups = [];
+  let currentStrip = [];
+  let lastPoint = null;
+  
+  // Sort points by their order along strips
+  const sortedPoints = [...allPhotoPoints].sort((a, b) => {
+    if (a.stripIndex !== b.stripIndex) return a.stripIndex - b.stripIndex;
+    return a.pointIndex - b.pointIndex;
+  });
+  
+  // Re-add only the filtered points
+  sortedPoints.forEach(pt => {
+    const stripIdx = pt.stripIndex;
+    const pointIdx = pt.pointIndex;
+    const totalPointsInStrip = allPhotoPoints.filter(p => p.stripIndex === stripIdx).length;
+    
+    // Keep points at start and end
+    if (pointIdx < keepCount || pointIdx >= totalPointsInStrip - keepCount) {
+      L.circleMarker([pt.lat, pt.lng], {radius: 3, color: 'red'}).addTo(layerPhotos);
+      filteredPhotoPoints.push(pt);
+    }
+  });
+  
+  // Update summary with filtered count
+  summaryStats.numPhotos = filteredPhotoPoints.length;
+  summaryTable.innerHTML = `
+    <tr><td>${t('summaryArea')}</td><td>${formatNumberDE(parseFloat(summaryStats.areaHa))} ha</td></tr>
+    <tr><td>${t('summaryStrips')}</td><td>${summaryStats.numStrips}</td></tr>
+    <tr><td>${t('summaryPhotos')}</td><td>${summaryStats.numPhotos}</td></tr>
+    <tr><td>${t('summaryLength')}</td><td>${formatNumberDE(parseFloat(summaryStats.totalLengthKm))} km</td></tr>
+    <tr><td>${t('summaryTime')}</td><td>${summaryStats.estTimeMin} min</td></tr>
+  `;
+}
+
+applyFilterBtn.onclick = applyPhotoFilter;
+resetFilterBtn.onclick = () => {
+  filterCountInput.value = 0;
+  applyPhotoFilter();
 };
 
 // Export functions
@@ -626,6 +738,71 @@ exportJsonBtn.onclick = () => {
   const a = document.createElement('a');
   a.href = url;
   a.download = 'drone-plan-summary.json';
+  a.click();
+  URL.revokeObjectURL(url);
+};
+
+// KML Export
+exportKmlBtn.onclick = () => {
+  const pointsToExport = filteredPhotoPoints.length > 0 ? filteredPhotoPoints : allPhotoPoints;
+  
+  let kml = `<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+<Document>
+  <name>Drone Flight Plan</name>
+  <description>Flight strips and photo points</description>
+  
+  <Style id="stripStyle">
+    <LineStyle>
+      <color>ff00ff00</color>
+      <width>2</width>
+    </LineStyle>
+  </Style>
+  
+  <Style id="photoStyle">
+    <IconStyle>
+      <color>ff0000ff</color>
+      <scale>0.5</scale>
+      <Icon>
+        <href>http://maps.google.com/mapfiles/kml/shapes/placemark_circle.png</href>
+      </Icon>
+    </IconStyle>
+  </Style>`;
+  
+  // Add strips
+  layerStrips.eachLayer(layer => {
+    if (layer instanceof L.Polyline) {
+      const coords = layer.getLatLngs().map(ll => `${ll.lng},${ll.lat},0`).join(' ');
+      kml += `
+  <Placemark>
+    <name>Flight Strip</name>
+    <styleUrl>#stripStyle</styleUrl>
+    <LineString>
+      <coordinates>${coords}</coordinates>
+    </LineString>
+  </Placemark>`;
+    }
+  });
+  
+  // Add photo points
+  pointsToExport.forEach((pt, idx) => {
+    kml += `
+  <Placemark>
+    <name>Photo ${idx + 1}</name>
+    <styleUrl>#photoStyle</styleUrl>
+    <Point>
+      <coordinates>${pt.lng},${pt.lat},0</coordinates>
+    </Point>
+  </Placemark>`;
+  });
+  
+  kml += '\n</Document>\n</kml>';
+  
+  const blob = new Blob([kml], {type: 'application/vnd.google-earth.kml+xml'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'drone-flight-plan.kml';
   a.click();
   URL.revokeObjectURL(url);
 };
