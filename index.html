@@ -31,6 +31,29 @@ button{margin-top:.5rem; padding:.5rem 1rem;}
   button, input, select { font-size:1rem; padding:.6rem; }
   #langToggle { position:absolute; top:1rem; right:1rem; }
 }
+/* Emphasize tabs with clear color schemes */
+.tab-btn { border: 1px solid #e5e7eb; transition: background-color .15s, color .15s, border-color .15s; }
+.tab-btn.active { border-color: rgba(0,0,0,.20); }
+
+/* Inactive palettes */
+.tab-btn[data-variant="blue"]  { background:#dbeafe; color:#1e3a8a; }  /* blue-100 / blue-900 */
+.tab-btn[data-variant="green"] { background:#dcfce7; color:#14532d; }  /* emerald-100 / emerald-900 */
+.tab-btn[data-variant="pink"]  { background:#ffe4e6; color:#881337; }  /* rose-100 / rose-900 */
+.tab-btn[data-variant="gold"]  { background:#fef3c7; color:#78350f; }  /* amber-100 / amber-900 */
+.tab-btn:not(.active):hover { filter: brightness(0.97); }
+
+/* Active palettes */
+.tab-btn.active[data-variant="blue"]  { background:#2563eb; color:#fff; border-color:#1d4ed8; } /* blue-600/700 */
+.tab-btn.active[data-variant="green"] { background:#16a34a; color:#fff; border-color:#15803d; } /* green-600/700 */
+.tab-btn.active[data-variant="pink"]  { background:#e11d48; color:#fff; border-color:#be123c; } /* rose-600/700 */
+.tab-btn.active[data-variant="gold"]  { background:#d97706; color:#fff; border-color:#b45309; } /* amber-600/700 */
+
+/* Make key action buttons more visible if Tailwind utilities aren’t enough */
+button#drawPolygonBtn,
+button#applyFilterBtn {
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.08);
+}
 </style>
   <!-- Tailwind CSS (CDN) + config for class-based dark mode -->
   <script>
@@ -78,11 +101,11 @@ button{margin-top:.5rem; padding:.5rem 1rem;}
 
   <!-- Tabs -->
   <div class="mb-3">
-    <nav class="flex space-x-1" role="tablist" aria-label="Sidebar tabs">
-      <button class="tab-btn px-3 py-1 rounded-md text-sm font-medium bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-100" data-tab="tab-image">Image / Drone</button>
-      <button class="tab-btn px-3 py-1 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700" data-tab="tab-flight">Flight Planning</button>
-      <button class="tab-btn px-3 py-1 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700" data-tab="tab-filter">Photo Filter</button>
-      <button class="tab-btn px-3 py-1 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700" data-tab="tab-export">Export</button>
+    <nav class="flex space-x-2" role="tablist" aria-label="Sidebar tabs">
+      <button class="tab-btn px-3 py-1 rounded-md text-sm font-medium active" role="tab" aria-selected="true" data-variant="blue" data-tab="tab-image">Image / Drone</button>
+      <button class="tab-btn px-3 py-1 rounded-md text-sm font-medium" role="tab" aria-selected="false" data-variant="green" data-tab="tab-flight">Flight Planning</button>
+      <button class="tab-btn px-3 py-1 rounded-md text-sm font-medium" role="tab" aria-selected="false" data-variant="pink" data-tab="tab-filter">Photo Filter</button>
+      <button class="tab-btn px-3 py-1 rounded-md text-sm font-medium" role="tab" aria-selected="false" data-variant="gold" data-tab="tab-export">Export</button>
     </nav>
   </div>
 
@@ -118,8 +141,8 @@ button{margin-top:.5rem; padding:.5rem 1rem;}
     <h3 id="section2" class="text-sm font-semibold text-gray-700 dark:text-gray-200">2. Flight Planning</h3>
     <p id="polygonDraw" class="text-sm text-gray-600 dark:text-gray-300">Polygon zeichnen:</p>
     <div class="flex space-x-2">
-      <button id="drawPolygonBtn" class="px-3 py-1 rounded bg-accent text-white">Polygon zeichnen</button>
-      <button id="clearPolygonBtn" class="px-3 py-1 rounded border">Polygon löschen</button>
+      <button id="drawPolygonBtn" class="px-3 py-2 rounded-md bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-400 text-white shadow-sm">Polygon zeichnen</button>
+      <button id="clearPolygonBtn" class="px-3 py-2 rounded-md bg-rose-600 hover:bg-rose-700 focus:outline-none focus:ring-2 focus:ring-rose-400 text-white shadow-sm">Polygon löschen</button>
     </div>
 
     <label id="labelShapefile" class="block mt-2 text-sm text-gray-600 dark:text-gray-300">Shapefile importieren:</label>
@@ -164,15 +187,15 @@ button{margin-top:.5rem; padding:.5rem 1rem;}
     <label for="filterCount" class="text-sm text-gray-600 dark:text-gray-300">Anzahl Punkte am Anfang/Ende behalten:</label>
     <input type="number" id="filterCount" value="3" min="0" max="50" class="w-full p-2 rounded border"/>
     <div class="flex space-x-2">
-      <button id="applyFilterBtn" class="px-3 py-1 rounded bg-accent text-white">Filter anwenden</button>
-      <button id="resetFilterBtn" class="px-3 py-1 rounded border">Filter zurücksetzen</button>
+      <button id="applyFilterBtn" class="px-3 py-2 rounded-md bg-rose-600 hover:bg-rose-700 focus:outline-none focus:ring-2 focus:ring-rose-400 text-white shadow-sm">Filter anwenden</button>
+      <button id="resetFilterBtn" class="px-3 py-2 rounded-md bg-amber-500 hover:bg-amber-600 focus:outline-none focus:ring-2 focus:ring-amber-300 text-white shadow-sm">Filter zurücksetzen</button>
     </div>
   </div>
 
   <div id="tab-export" class="tab-panel hidden space-y-2">
     <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-200">Export</h3>
     <div class="flex flex-col space-y-2">
-      <button id="exportKmlBtn" class="export-btn px-3 py-1 rounded bg-indigo-600 text-white hidden">KML Export</button>
+      <button id="exportKmlBtn" class="export-btn px-3 py-2 rounded-md bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-400 text-white hidden">KML Export</button>
       <button id="exportCsvBtnTop" class="export-btn px-3 py-1 rounded border">CSV Export</button>
       <button id="exportJsonBtnTop" class="export-btn px-3 py-1 rounded border">JSON Export</button>
     </div>
@@ -186,7 +209,11 @@ button{margin-top:.5rem; padding:.5rem 1rem;}
       const panels = document.querySelectorAll('.tab-panel');
       function activate(tabId){
         panels.forEach(p => p.id === tabId ? p.classList.remove('hidden') : p.classList.add('hidden'));
-        tabs.forEach(b => b.classList.toggle('bg-gray-100', b.dataset.tab === tabId));
+        tabs.forEach(btn => {
+          const isActive = btn.dataset.tab === tabId;
+          btn.classList.toggle('active', isActive);
+          btn.setAttribute('aria-selected', isActive ? 'true' : 'false');
+        });
       }
       // default
       activate('tab-image');
