@@ -56,7 +56,7 @@ export function generateKml(pointsToExport = [], stripElevations = {}, options =
     if (!Array.isArray(stripPoints) || stripPoints.length === 0) continue;
 
     const coordsStr = stripPoints.map((p) => {
-      const alt = (p.absoluteAltitude !== undefined && !isNaN(p.absoluteAltitude)) ? p.absoluteAltitude.toFixed(2) : 0;
+      const alt = (typeof p.absoluteAltitude === 'number' && !isNaN(p.absoluteAltitude)) ? p.absoluteAltitude.toFixed(2) : 0;
       return `${p.lng},${p.lat},${alt}`;
     }).join(' ');
 
@@ -75,7 +75,7 @@ export function generateKml(pointsToExport = [], stripElevations = {}, options =
 
   // Add photo points
   pointsToExport.forEach((pt, idx) => {
-    const alt = (pt.absoluteAltitude !== undefined && !isNaN(pt.absoluteAltitude)) ? pt.absoluteAltitude.toFixed(2) : 0;
+    const alt = (typeof pt.absoluteAltitude === 'number' && !isNaN(pt.absoluteAltitude)) ? pt.absoluteAltitude.toFixed(2) : 0;
     kml += `
   <Placemark>
     <name>Photo ${idx + 1}</name>
@@ -128,6 +128,7 @@ export function exportKml(pointsToExport = [], stripElevations = {}, filename = 
 /**
  * Simple XML escape for element content (not attributes).
  * @param {string} str
+ * @returns {string}
  */
 function escapeXml(str) {
   if (str === undefined || str === null) return '';
@@ -136,5 +137,5 @@ function escapeXml(str) {
     .replace(/</g, '<')
     .replace(/>/g, '>')
     .replace(/"/g, '"')
-    .replace(/'/g, ''');
+    .replace(/'/g, "'");
 }
