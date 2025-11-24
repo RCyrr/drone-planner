@@ -32,6 +32,24 @@ button{margin-top:.5rem; padding:.5rem 1rem;}
   #langToggle { position:absolute; top:1rem; right:1rem; }
 }
 </style>
+  <!-- ES Modules (load early to avoid undefined when handlers fire) -->
+  <script type="module">
+    import { fetchElevationsBatch, addElevationData } from './src/elevation.js';
+    import { generateKml, exportKml as exportKmlModule } from './src/kml.js';
+    import { calculateStrips } from './src/strips.js';
+    import { initMap, bindUI } from './src/map.js';
+
+    // Expose to window so existing inline code can call them
+    window.fetchElevationsBatch = fetchElevationsBatch;
+    window.addElevationData = addElevationData;
+    window.generateKml = generateKml;
+    window.exportKmlModule = exportKmlModule;
+    window.calculateStripsModule = calculateStrips;
+    window.initMapModule = initMap;
+    window.bindUI = bindUI;
+
+    console.log('ES modules loaded (head) for GitHub Pages/static hosting');
+  </script>
 </head>
 <body>
 <div id="sidebar">
@@ -523,127 +541,68 @@ function clearStrips(){ layerStrips.clearLayers(); layerPhotos.clearLayers(); }
 
 let summaryStats = {};
 
-calcBtn.onclick = () => {
-  if(!polygon) return;
+calcBtn.onclick = async () => {
+  if (!polygon) return;
   clearStrips();
+
+  // Build drone object and options to pass to calculateStrips
   const droneName = droneSelect.value;
-  const drone = DRONE_DATABASE[droneName];
-  const pixelSize_m=(parseFloat(pixelInput.value)|| (drone?drone.pixelSize_um:0))*1e-6;
-  const focal_m=(parseFloat(focalInput.value)|| (drone?drone.focalLength_mm:0))*1e-3;
-  const imgW = drone?drone.sensorWidth_px: (parseInt(exifBox.dataset.imgw)||0);
-  const imgH = drone?drone.sensorHeight_px: (parseInt(exifBox.dataset.imgh)||0);
-  const H = parseFloat(heightInput.value);
-  const frontlap = parseFloat(frontlapInput.value)/100;
-  const sidelap = parseFloat(sidelapInput.value)/100;
-  const dir = parseFloat(directionInput.value)%360;
-
-  const sensorW_m = imgW*pixelSize_m;
-  const sensorH_m = imgH*pixelSize_m;
-  const footprintX = H*sensorW_m/focal_m; // image width on ground [m]
-  const footprintY = H*sensorH_m/focal_m; // image height on ground [m]
-  stripOutput.innerHTML = `Footprint: ${footprintX.toFixed(2)} m x ${footprintY.toFixed(2)} m`;
-
-  // prepare polygon (GeoJSON)
-  const poly = turf.polygon(polygon.toGeoJSON().geometry.coordinates);
-  const centroid = turf.centroid(poly);
-  const rotatedPoly = turf.transformRotate(poly, -dir, { pivot: centroid });
-  const bbox = turf.bbox(rotatedPoly); // [minX,minY,maxX,maxY] in lon/lat
-
-  // spacing in meters
-  const stripSpacing = footprintX*(1-sidelap);
-  const photoSpacing = footprintY*(1-frontlap);
-
-  const minX = bbox[0], maxX = bbox[2];
-  const bboxCenter = [(bbox[0]+bbox[2])/2, (bbox[1]+bbox[3])/2];
-  const leftPoint = turf.point([minX, bboxCenter[1]]);
-  const rightPoint = turf.point([maxX, bboxCenter[1]]);
-  const totalWidth_km = turf.distance(leftPoint, rightPoint, {units:'kilometers'});
-  const totalWidth_m = totalWidth_km*1000;
-  // More accurate strip calculation - use less padding
-  let numStrips = Math.ceil((totalWidth_m + stripSpacing) / stripSpacing);
-  const startPoint = turf.destination(leftPoint, (-stripSpacing)/1000, 90, {units:'kilometers'});
-
-  let totalPhotos = 0;
-  let totalStripLengthKm = 0;
-  let actualStripCount = 0; // Track actual strips drawn
-  
-  // Reset photo points storage
-  allPhotoPoints = [];
-  filteredPhotoPoints = [];
-  
-  for(let i=0;i<numStrips;i++){
-    const offset_m = i*stripSpacing;
-    const offsetPoint = turf.destination(startPoint, offset_m/1000, 90, {units:'kilometers'});
-    const top = turf.destination(offsetPoint, 20000/1000, 0, {units:'kilometers'});
-    const bottom = turf.destination(offsetPoint, 20000/1000, 180, {units:'kilometers'});
-    const line = turf.lineString([bottom.geometry.coordinates, top.geometry.coordinates]);
-
-    const split = turf.lineSplit(line, rotatedPoly);
-    let stripSegments = 0;
-    let pointIndexInStrip = 0;
-    
-    split.features.forEach(seg=>{
-      const segMid = turf.midpoint(turf.point(seg.geometry.coordinates[0]), turf.point(seg.geometry.coordinates[seg.geometry.coordinates.length-1]));
-      if(turf.booleanPointInPolygon(segMid, rotatedPoly)){
-        const segBack = turf.transformRotate(seg, dir, { pivot: centroid });
-        const latlngs = segBack.geometry.coordinates.map(c=>[c[1], c[0]]);
-        L.polyline(latlngs, {color:'green'}).addTo(layerStrips);
-        stripSegments++;
-
-        const segLength_km = turf.length(seg, {units:'kilometers'});
-        const segLength_m = segLength_km*1000;
-        totalStripLengthKm += segLength_km;
-        if(segLength_m < 1) return;
-        const stepCount = Math.floor(segLength_m / photoSpacing);
-        for(let s=0;s<=stepCount;s++){
-          const dist_km = (s * photoSpacing)/1000;
-          const ptOnSeg = turf.along(seg, dist_km, {units:'kilometers'});
-          const ptBack = turf.transformRotate(ptOnSeg, dir, { pivot: centroid });
-          const coords = ptBack.geometry.coordinates; // [lng,lat]
-          if(turf.booleanPointInPolygon(ptBack, poly)){
-            const marker = L.circleMarker([coords[1], coords[0]], {radius:3, color:'red'}).addTo(layerPhotos);
-            totalPhotos++;
-            
-            // Store photo point with metadata for filtering
-            allPhotoPoints.push({
-              lat: coords[1],
-              lng: coords[0],
-              stripIndex: actualStripCount,
-              pointIndex: pointIndexInStrip,
-              marker: marker
-            });
-            pointIndexInStrip++;
-          }
-        }
-      }
-    });
-    if(stripSegments > 0) actualStripCount++;
-  }
-
-  // Validation check: compare calculated vs actual strips
-  // Only show warning if there's a significant discrepancy (>2 strips difference)
-  let stripWarning = '';
-  const stripDiff = Math.abs(actualStripCount - numStrips);
-  if (stripDiff > 2) {
-    stripWarning = `<div class=\"warning\">Hinweis: Berechnete Streifen (${numStrips}) wurden auf tatsächliche (${actualStripCount}) korrigiert</div>`;
-  }
-  // Always use actual count for summary to be accurate
-  numStrips = actualStripCount;
-
-  // Calculate summary stats
-  const areaHa = turf.area(poly) / 10000; // hectares
-  const estFlightTimeMin = (totalStripLengthKm / 0.6) * 60; // assuming 10 m/s = 0.6 km/min
-
-  summaryStats = {
-    areaHa: areaHa.toFixed(2),
-    numStrips: numStrips,
-    numPhotos: totalPhotos,
-    totalLengthKm: totalStripLengthKm.toFixed(2),
-    estTimeMin: Math.ceil(estFlightTimeMin)
+  const drone = DRONE_DATABASE[droneName] || {};
+  const options = {
+    height: parseFloat(heightInput.value) || 0,
+    frontlap: parseFloat(frontlapInput.value) / 100 || 0.7,
+    sidelap: parseFloat(sidelapInput.value) / 100 || 0.6,
+    direction: parseFloat(directionInput.value) % 360 || 0,
+    minSegmentLength: 1
   };
 
-  // Render summary table with formatted numbers for German locale
+  // Provide sensor sizes if available
+  if (drone && drone.sensorWidth_px) drone.sensorWidth_px = drone.sensorWidth_px;
+  if (drone && drone.sensorHeight_px) drone.sensorHeight_px = drone.sensorHeight_px;
+  // allow user-overrides from inputs
+  drone.pixelSize_um = parseFloat(pixelInput.value) || drone.pixelSize_um;
+  drone.focalLength_mm = parseFloat(focalInput.value) || drone.focalLength_mm;
+  drone.sensorWidth_px = drone.sensorWidth_px || parseInt(exifBox.dataset.imgw) || drone.sensorWidth_px;
+  drone.sensorHeight_px = drone.sensorHeight_px || parseInt(exifBox.dataset.imgh) || drone.sensorHeight_px;
+
+  // Convert the Leaflet polygon to GeoJSON polygon to pass to the module
+  const polygonGeoJSON = polygon.toGeoJSON().geometry;
   try {
+    const result = calculateStripsModule(polygonGeoJSON, drone, options);
+    const { photoPoints, stripLines, summaryStats: newSummary } = result;
+
+    // Render strips returned (stripLines are arrays of [lng,lat] points)
+    stripLines.forEach((strip) => {
+      if (strip && strip.coordinates && strip.coordinates.length > 0) {
+        const latlngs = strip.coordinates.map(c => [c[1], c[0]]); // convert to [lat,lng]
+        L.polyline(latlngs, { color: 'green' }).addTo(layerStrips);
+      }
+    });
+
+    // Render photo points and populate allPhotoPoints
+    allPhotoPoints = [];
+    filteredPhotoPoints = [];
+    photoPoints.forEach((pt, idx) => {
+      const marker = L.circleMarker([pt.lat, pt.lng], { radius: 3, color: 'red' }).addTo(layerPhotos);
+      allPhotoPoints.push({
+        lat: pt.lat,
+        lng: pt.lng,
+        stripIndex: pt.stripIndex,
+        pointIndex: pt.pointIndex,
+        marker: marker
+      });
+    });
+
+    // Apply summary stats returned
+    summaryStats = {
+      areaHa: newSummary.areaHa,
+      numStrips: newSummary.numStrips,
+      numPhotos: newSummary.numPhotos,
+      totalLengthKm: newSummary.totalLengthKm,
+      estTimeMin: newSummary.estTimeMin
+    };
+
+    // Render summary table
     summaryTable.innerHTML = `
       <tr><td>${t('summaryArea')}</td><td>${formatNumberDE(parseFloat(summaryStats.areaHa))} ha</td></tr>
       <tr><td>${t('summaryStrips')}</td><td>${summaryStats.numStrips}</td></tr>
@@ -651,29 +610,19 @@ calcBtn.onclick = () => {
       <tr><td>${t('summaryLength')}</td><td>${formatNumberDE(parseFloat(summaryStats.totalLengthKm))} km</td></tr>
       <tr><td>${t('summaryTime')}</td><td>${summaryStats.estTimeMin} min</td></tr>
     `;
-  } catch (error) {
-    console.error('Error rendering summary table:', error);
-    summaryTable.innerHTML = `
-      <tr><td colspan="2">Error rendering summary: ${error.message}</td></tr>
-    `;
+
+    // Show UI controls
+    summaryDiv.style.display = 'block';
+    photoFilterDiv.style.display = 'block';
+    exportKmlBtn.style.display = 'inline-block';
+
+    // Fetch elevations asynchronously and apply
+    await addElevationData();
+
+  } catch (err) {
+    console.error('Error calculating strips:', err);
+    stripOutput.innerHTML = `Error calculating strips: ${err.message}`;
   }
-  
-  // Always show summary div
-  summaryDiv.style.display = 'block';
-  
-  // Show warning if strip count mismatch
-  if (stripWarning) {
-    document.getElementById('summaryWarning').innerHTML = stripWarning;
-  } else {
-    document.getElementById('summaryWarning').innerHTML = '';
-  }
-  
-  // Show photo filter controls
-  photoFilterDiv.style.display = 'block';
-  exportKmlBtn.style.display = 'inline-block';
-  
-  // Fetch elevation data for all points
-  addElevationData();
 };
 
 // Store all photo points for filtering
@@ -761,92 +710,13 @@ exportJsonBtn.onclick = () => {
   URL.revokeObjectURL(url);
 };
 
-// KML Export
+// KML Export (uses kml module)
 exportKmlBtn.onclick = () => {
-  const pointsToExport = filteredPhotoPoints.length > 0 ? filteredPhotoPoints : allPhotoPoints;
-  
-  console.log("Exporting KML with points:", pointsToExport);
-  console.log("Strip elevations:", window.stripElevations);
-  
-  let kml = `<?xml version="1.0" encoding="UTF-8"?>
-<kml xmlns="http://www.opengis.net/kml/2.2">
-<Document>
-  <name>Drone Flight Plan</name>
-  <description>Flight strips and photo points</description>
-  
-  <Style id="stripStyle">
-    <LineStyle>
-      <color>ff00ff00</color>
-      <width>2</width>
-    </LineStyle>
-  </Style>
-  
-  <Style id="photoStyle">
-    <IconStyle>
-      <color>ff0000ff</color>
-      <scale>0.5</scale>
-      <Icon>
-        <href>http://maps.google.com/mapfiles/kml/shapes/placemark_circle.png</href>
-      </Icon>
-    </IconStyle>
-  </Style>`;
-  
-  // Add strips
-  layerStrips.eachLayer(layer => {
-    if (layer instanceof L.Polyline) {
-      const layerId = L.stamp(layer);
-      const stripPoints = window.stripElevations && window.stripElevations[layerId] ? window.stripElevations[layerId] : null;
-      let coordsStr;
-      if (stripPoints) {
-        coordsStr = stripPoints.map(p => {
-          const alt = p.absoluteAltitude !== undefined ? p.absoluteAltitude.toFixed(2) : 0;
-          console.log(`Strip point: ${p.lng},${p.lat},${alt}`);
-          return `${p.lng},${p.lat},${alt}`;
-        }).join(' ');
-      } else {
-        coordsStr = layer.getLatLngs().map(ll => `${ll.lng},${ll.lat},0`).join(' ');
-        console.warn("No strip elevation data found, using 0 altitude");
-      }
-      kml += `
-  <Placemark>
-    <name>Flight Strip</name>
-    <styleUrl>#stripStyle</styleUrl>
-    <LineString>
-      <coordinates>${coordsStr}</coordinates>
-      <altitudeMode>absolute</altitudeMode>
-      <extrude>1</extrude>
-    </LineString>
-  </Placemark>`;
-    }
-  });
-  
-  // Add photo points
-  pointsToExport.forEach((pt, idx) => {
-    const altitude = pt.absoluteAltitude !== undefined ? pt.absoluteAltitude.toFixed(2) : 0;
-    console.log(`Photo point ${idx}: ${pt.lng},${pt.lat},${altitude}`);
-    kml += `
-  <Placemark>
-    <name>Photo ${idx + 1}</name>
-    <styleUrl>#photoStyle</styleUrl>
-    <Point>
-      <coordinates>${pt.lng},${pt.lat},${altitude}</coordinates>
-      <altitudeMode>absolute</altitudeMode>
-      <extrude>1</extrude>
-    </Point>
-  </Placemark>`;
-  });
-  
-  kml += '\n</Document>\n</kml>';
-  
-  console.log("Generated KML:", kml);
-  
-  const blob = new Blob([kml], {type: 'application/vnd.google-earth.kml+xml'});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = 'drone-flight-plan.kml';
-  a.click();
-  URL.revokeObjectURL(url);
+  const pts = filteredPhotoPoints.length > 0 ? filteredPhotoPoints : allPhotoPoints;
+  const stripElevs = window.stripElevations || {};
+  console.log("Exporting KML via module, points:", pts, "stripElevs:", stripElevs);
+  // Generate & download via module helper
+  exportKmlModule(pts, stripElevs, 'drone-flight-plan.kml', { title: 'Drone Flight Plan', description: 'Flight strips and photo points' });
 };
 
 // Language toggle
@@ -1032,3 +902,21 @@ checkReady();
 </script>
 </body>
 </html>
+
+<script type="module">
+  import { fetchElevationsBatch, addElevationData } from './src/elevation.js';
+  import { generateKml, exportKml as exportKmlModule } from './src/kml.js';
+  import { calculateStrips } from './src/strips.js';
+  import { initMap, bindUI } from './src/map.js';
+
+  // Expose module functions to window for incremental integration with existing inline code
+  window.fetchElevationsBatch = fetchElevationsBatch;
+  window.addElevationData = addElevationData;
+  window.generateKml = generateKml;
+  window.exportKmlModule = exportKmlModule;
+  window.calculateStripsModule = calculateStrips;
+  window.initMapModule = initMap;
+  window.bindUI = bindUI;
+
+  console.log('Modules loaded: elevation, kml, strips, map');
+</script>
