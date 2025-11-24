@@ -623,7 +623,18 @@ calcBtn.onclick = async () => {
     exportKmlBtn.style.display = 'inline-block';
 
     // Fetch elevations asynchronously and apply (use module-bound function)
-    await window.addElevationData();
+    if (!window.addElevationData) {
+      try {
+        const mod = await import('./src/elevation.js');
+        window.addElevationData = mod.addElevationData;
+        console.log('Loaded elevation module dynamically as fallback');
+      } catch (e) {
+        console.error('Failed to load elevation module dynamically:', e);
+      }
+    }
+    if (window.addElevationData) {
+      await window.addElevationData();
+    }
 
   } catch (err) {
     console.error('Error calculating strips:', err);
@@ -717,12 +728,24 @@ exportJsonBtn.onclick = () => {
 };
 
 // KML Export (uses kml module)
-exportKmlBtn.onclick = () => {
+exportKmlBtn.onclick = async () => {
   const pts = filteredPhotoPoints.length > 0 ? filteredPhotoPoints : allPhotoPoints;
   const stripElevs = window.stripElevations || {};
   console.log("Exporting KML via module, points:", pts, "stripElevs:", stripElevs);
+  // Ensure module function exists (fallback if head bootstrap failed)
+  if (!window.exportKmlModule) {
+    try {
+      const mod = await import('./src/kml.js');
+      window.exportKmlModule = mod.exportKml;
+      window.generateKml = mod.generateKml;
+      console.log('Loaded kml module dynamically as fallback');
+    } catch (e) {
+      console.error('Failed to load kml module dynamically:', e);
+      return;
+    }
+  }
   // Generate & download via module helper
-  exportKmlModule(pts, stripElevs, 'drone-flight-plan.kml', { title: 'Drone Flight Plan', description: 'Flight strips and photo points' });
+  window.exportKmlModule(pts, stripElevs, 'drone-flight-plan.kml', { title: 'Drone Flight Plan', description: 'Flight strips and photo points' });
 };
 
 // Language toggle
