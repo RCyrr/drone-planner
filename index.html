@@ -945,33 +945,40 @@ function exifxmp_mapPix4D(meta, txt) {
   };
   return {
     // Position and altitude
-    lat: pick(meta.latitude, meta.GPSLatitude, meta.gpsLatitude, getTxt('GPSLatitude'), getTxt('latitude')),
-    lon: pick(meta.longitude, meta.GPSLongitude, meta.gpsLongitude, getTxt('GPSLongitude'), getTxt('longitude')),
+    lat: pick(
+      meta.latitude, meta.GPSLatitude, meta.gpsLatitude,
+      dj.GpsLatitude, getTxt('GpsLatitude'), getTxt('GPSLatitude'), getTxt('latitude')
+    ),
+    lon: pick(
+      meta.longitude, meta.GPSLongitude, meta.gpsLongitude,
+      dj.GpsLongitude, getTxt('GpsLongitude'), getTxt('GPSLongitude'), getTxt('longitude')
+    ),
     absAlt: pick(meta.GPSAltitude, meta.gpsAltitude, dj.AbsoluteAltitude, x.AbsoluteAltitude, getTxt('AbsoluteAltitude')),
     relAlt: pick(dj.RelativeAltitude, dj.relativeAltitude, x.RelativeAltitude, getTxt('RelativeAltitude')),
 
     // Aircraft attitude and gimbal
-    flightDir: pick(dj.flightDirection, x.FlightYawDegree, getTxt('FlightYawDegree')),
-    flightRoll: pick(x.FlightRollDegree, getTxt('FlightRollDegree')),
-    flightPitch: pick(x.FlightPitchDegree, getTxt('FlightPitchDegree')),
-    gRoll: pick(dj.gimbalRoll, x.GimbalRollDegree, getTxt('GimbalRollDegree')),
-    gPitch: pick(dj.gimbalPitch, x.GimbalPitchDegree, getTxt('GimbalPitchDegree')),
-    gYaw: pick(dj.gimbalYaw, x.GimbalYawDegree, getTxt('GimbalYawDegree')),
+    flightDir: pick(dj.FlightYawDegree, dj.flightDirection, x.FlightYawDegree, getTxt('FlightYawDegree')),
+    flightRoll: pick(dj.FlightRollDegree, x.FlightRollDegree, getTxt('FlightRollDegree')),
+    flightPitch: pick(dj.FlightPitchDegree, x.FlightPitchDegree, getTxt('FlightPitchDegree')),
+    gRoll: pick(dj.GimbalRollDegree, dj.gimbalRoll, x.GimbalRollDegree, getTxt('GimbalRollDegree')),
+    gPitch: pick(dj.GimbalPitchDegree, dj.gimbalPitch, x.GimbalPitchDegree, getTxt('GimbalPitchDegree')),
+    gYaw: pick(dj.GimbalYawDegree, dj.gimbalYaw, x.GimbalYawDegree, getTxt('GimbalYawDegree')),
 
     // GNSS/RTK quality
     gnssPosAcc: pick(dj.gnssAccuracyPosition, x.GpsHAccuracy, getTxt('GpsHAccuracy')),
     gnssHAcc: pick(dj.gnssAccuracyHeight, x.GpsVAccuracy, getTxt('GpsVAccuracy')),
     gpsSats: pick(x.GpsNum, getTxt('GpsNum')),
     gpsSignal: pick(x.GpsSignalLevel, getTxt('GpsSignalLevel')),
+    gpsStatus: pick(dj.GpsStatus, x.GpsStatus, getTxt('GpsStatus')),
     rtkFlag: pick(dj.RtkFlag, getTxt('RtkFlag')),
     rtkStdLon: pick(dj.RtkStdLon, parseFloat(getTxt('RtkStdLon'))),
     rtkStdLat: pick(dj.RtkStdLat, parseFloat(getTxt('RtkStdLat'))),
     rtkStdHgt: pick(dj.RtkStdHgt, parseFloat(getTxt('RtkStdHgt'))),
 
     // Kinematics
-    speedX: pick(x.VelocityX, getTxt('VelocityX')),
-    speedY: pick(x.VelocityY, getTxt('VelocityY')),
-    speedZ: pick(x.VelocityZ, getTxt('VelocityZ')),
+    speedX: pick(dj.FlightXSpeed, x.VelocityX, getTxt('FlightXSpeed'), getTxt('VelocityX')),
+    speedY: pick(dj.FlightYSpeed, x.VelocityY, getTxt('FlightYSpeed'), getTxt('VelocityY')),
+    speedZ: pick(dj.FlightZSpeed, x.VelocityZ, getTxt('FlightZSpeed'), getTxt('VelocityZ')),
 
     // Camera/exposure
     make: pick(meta.Make, meta.make, getTxt('Make')),
