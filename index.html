@@ -921,43 +921,131 @@ document.getElementById('langToggle').onclick = () => {
 checkReady();
 
 // EXIF/XMP Reader Tool (robust init with retries to avoid race conditions)
-function exifxmp_mapPix4D(meta) {
+let exifxmp_lastMeta = null;
+function exifxmp_parseTxt(text) {
+  const map = {};
+  if (!text) return map;
+  const re = /([A-Za-z0-9\-:]+)\s*=\s*"([^"]*)"/g;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    map[m[1]] = m[2];
+  }
+  return map;
+}
+function exifxmp_mapPix4D(meta, txt) {
   const x = meta && meta.xmp ? meta.xmp : {};
-  const drone = x.drone || x['drone-dji'] || x['aux'] || x;
+  const dj = x['drone-dji'] || x.drone || x['aux'] || {};
+  const txtMap = txt || {};
+  const getTxt = (k) => (txtMap[k] ?? txtMap['drone-dji:'+k] ?? null);
+  const pick = (...vals) => {
+    for (const v of vals) {
+      if (v !== undefined && v !== null && v !== '') return v;
+    }
+    return null;
+  };
   return {
-    lat: (meta.latitude ?? meta.GPSLatitude ?? meta.gpsLatitude ?? null),
-    lon: (meta.longitude ?? meta.GPSLongitude ?? meta.gpsLongitude ?? null),
-    absAlt: (meta.GPSAltitude ?? meta.gpsAltitude ?? null),
-    relAlt: (drone?.relativeAltitude ?? x.RelativeAltitude ?? null),
-    flightDir: (drone?.flightDirection ?? x.FlightYawDegree ?? null),
-    gRoll: (drone?.gimbalRoll ?? x.GimbalRollDegree ?? null),
-    gPitch: (drone?.gimbalPitch ?? x.GimbalPitchDegree ?? null),
-    gYaw: (drone?.gimbalYaw ?? x.GimbalYawDegree ?? null),
-    gnssPosAcc: (drone?.gnssAccuracyPosition ?? x.GpsHAccuracy ?? null),
-    gnssHAcc: (drone?.gnssAccuracyHeight ?? x.GpsVAccuracy ?? null),
-    make: (meta.Make || meta.make || null),
-    model: (meta.Model || meta.model || null),
-    focal: (meta.FocalLength || meta.focalLength || null),
+    // Position and altitude
+    lat: pick(meta.latitude, meta.GPSLatitude, meta.gpsLatitude, getTxt('GPSLatitude'), getTxt('latitude')),
+    lon: pick(meta.longitude, meta.GPSLongitude, meta.gpsLongitude, getTxt('GPSLongitude'), getTxt('longitude')),
+    absAlt: pick(meta.GPSAltitude, meta.gpsAltitude, dj.AbsoluteAltitude, x.AbsoluteAltitude, getTxt('AbsoluteAltitude')),
+    relAlt: pick(dj.RelativeAltitude, dj.relativeAltitude, x.RelativeAltitude, getTxt('RelativeAltitude')),
+
+    // Aircraft attitude and gimbal
+    flightDir: pick(dj.flightDirection, x.FlightYawDegree, getTxt('FlightYawDegree')),
+    flightRoll: pick(x.FlightRollDegree, getTxt('FlightRollDegree')),
+    flightPitch: pick(x.FlightPitchDegree, getTxt('FlightPitchDegree')),
+    gRoll: pick(dj.gimbalRoll, x.GimbalRollDegree, getTxt('GimbalRollDegree')),
+    gPitch: pick(dj.gimbalPitch, x.GimbalPitchDegree, getTxt('GimbalPitchDegree')),
+    gYaw: pick(dj.gimbalYaw, x.GimbalYawDegree, getTxt('GimbalYawDegree')),
+
+    // GNSS/RTK quality
+    gnssPosAcc: pick(dj.gnssAccuracyPosition, x.GpsHAccuracy, getTxt('GpsHAccuracy')),
+    gnssHAcc: pick(dj.gnssAccuracyHeight, x.GpsVAccuracy, getTxt('GpsVAccuracy')),
+    gpsSats: pick(x.GpsNum, getTxt('GpsNum')),
+    gpsSignal: pick(x.GpsSignalLevel, getTxt('GpsSignalLevel')),
+    rtkFlag: pick(dj.RtkFlag, getTxt('RtkFlag')),
+    rtkStdLon: pick(dj.RtkStdLon, parseFloat(getTxt('RtkStdLon'))),
+    rtkStdLat: pick(dj.RtkStdLat, parseFloat(getTxt('RtkStdLat'))),
+    rtkStdHgt: pick(dj.RtkStdHgt, parseFloat(getTxt('RtkStdHgt'))),
+
+    // Kinematics
+    speedX: pick(x.VelocityX, getTxt('VelocityX')),
+    speedY: pick(x.VelocityY, getTxt('VelocityY')),
+    speedZ: pick(x.VelocityZ, getTxt('VelocityZ')),
+
+    // Camera/exposure
+    make: pick(meta.Make, meta.make, getTxt('Make')),
+    model: pick(meta.Model, meta.model, getTxt('Model')),
+    focal: pick(meta.FocalLength, meta.focalLength, getTxt('FocalLength')),
+    iso: pick(meta.ISO, meta.ISOSpeedRatings, getTxt('ISO')),
+    shutter: pick(meta.ExposureTime, getTxt('ExposureTime')),
+    fnumber: pick(meta.FNumber, getTxt('FNumber')),
   };
 }
-function exifxmp_render(meta) {
+function exifxmp_render(meta, txt) {
   const resultsDiv = document.getElementById('exifXmpResults');
   if (!resultsDiv) return;
-  const m = exifxmp_mapPix4D(meta);
+  const m = exifxmp_mapPix4D(meta, txt);
   const fmt = (v, d=2, suf='') => (v!=null && !isNaN(v)) ? Number(v).toFixed(d)+suf : 'N/A';
+  const fmtStr = (v) => (v!==undefined && v!==null && v!=='') ? String(v) : 'N/A';
+
+  // Optional: render all available tags (from provided .txt, or flatten xmp)
+  let allTagsHtml = '';
+  const buildAllTags = () => {
+    const rows = [];
+    if (txt) {
+      const keys = Object.keys(txt).sort();
+      keys.forEach(k => rows.push(`<tr><td class="pr-2 py-0.5">${k}</td><td class="py-0.5">${fmtStr(txt[k])}</td></tr>`));
+    } else if (meta && meta.xmp && typeof meta.xmp === 'object') {
+      const flatten = (obj, pfx='') => {
+        Object.entries(obj).forEach(([k,v])=>{
+          const key = pfx ? `${pfx}:${k}` : k;
+          if (v && typeof v === 'object' && !Array.isArray(v)) flatten(v, key);
+          else rows.push(`<tr><td class="pr-2 py-0.5">${key}</td><td class="py-0.5">${fmtStr(v)}</td></tr>`);
+        });
+      };
+      flatten(meta.xmp);
+    }
+    if (rows.length) {
+      allTagsHtml = `
+        <details class="mt-3">
+          <summary class="cursor-pointer text-xs text-gray-600 dark:text-gray-300">Show all parsed XMP tags</summary>
+          <div class="mt-2 max-h-56 overflow-auto border border-gray-200 dark:border-gray-700 rounded">
+            <table class="w-full text-xs">
+              <tbody>${rows.join('')}</tbody>
+            </table>
+          </div>
+        </details>
+      `;
+    }
+  };
+  buildAllTags();
+
   resultsDiv.innerHTML = `
     <div class="grid grid-cols-2 gap-4 text-sm">
       <div><strong>GPS Coordinates:</strong> ${fmt(m.lat,8)}, ${fmt(m.lon,8)}</div>
       <div><strong>Absolute Altitude:</strong> ${fmt(m.absAlt,2,' m')}</div>
       <div><strong>Relative Altitude:</strong> ${fmt(m.relAlt,2,' m')}</div>
-      <div><strong>Camera Make:</strong> ${m.make || 'N/A'}</div>
-      <div><strong>Camera Model:</strong> ${m.model || 'N/A'}</div>
+
+      <div><strong>Camera Make:</strong> ${fmtStr(m.make)}</div>
+      <div><strong>Camera Model:</strong> ${fmtStr(m.model)}</div>
       <div><strong>Focal Length:</strong> ${fmt(m.focal,2,' mm')}</div>
-      <div><strong>Flight Direction:</strong> ${fmt(m.flightDir,2,'°')}</div>
-      <div><strong>Gimbal Angles:</strong> ${fmt(m.gRoll,2,'°')}, ${fmt(m.gPitch,2,'°')}, ${fmt(m.gYaw,2,'°')}</div>
-      <div><strong>GNSS Accuracy Position:</strong> ${fmt(m.gnssPosAcc,2,' m')}</div>
-      <div><strong>GNSS Accuracy Height:</strong> ${fmt(m.gnssHAcc,2,' m')}</div>
+      <div><strong>Exposure:</strong> ISO ${fmtStr(m.iso)} · ${fmtStr(m.shutter)} s · f/${fmtStr(m.fnumber)}</div>
+
+      <div><strong>Flight Direction (Yaw):</strong> ${fmt(m.flightDir,2,'°')}</div>
+      <div><strong>Flight Attitude (Roll/Pitch):</strong> ${fmt(m.flightRoll,2,'°')} / ${fmt(m.flightPitch,2,'°')}</div>
+
+      <div><strong>Gimbal Angles (R/P/Y):</strong> ${fmt(m.gRoll,2,'°')}, ${fmt(m.gPitch,2,'°')}, ${fmt(m.gYaw,2,'°')}</div>
+
+      <div><strong>GNSS Acc (H/V):</strong> ${fmt(m.gnssPosAcc,2,' m')} / ${fmt(m.gnssHAcc,2,' m')}</div>
+      <div><strong>GNSS Sats / Signal:</strong> ${fmtStr(m.gpsSats)} / ${fmtStr(m.gpsSignal)}</div>
+
+      <div><strong>Velocity (X/Y/Z):</strong> ${fmt(m.speedX,2,' m/s')}, ${fmt(m.speedY,2,' m/s')}, ${fmt(m.speedZ,2,' m/s')}</div>
+
+      <div><strong>RTK Flag:</strong> ${fmtStr(m.rtkFlag)}</div>
+      <div><strong>RTK Std (Lon/Lat/Hgt):</strong> ${fmt(m.rtkStdLon,3,' m')}, ${fmt(m.rtkStdLat,3,' m')}, ${fmt(m.rtkStdHgt,3,' m')}</div>
     </div>
+    ${allTagsHtml}
   `;
 }
 function exifxmp_init(maxTries = 20) {
@@ -1056,7 +1144,9 @@ if (document.readyState === 'complete' || document.readyState === 'interactive')
     <button id="exifXmpClose" class="px-2 py-1 text-sm rounded bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-200">Close</button>
   </div>
   <div class="p-4 overflow-y-auto h-full">
-    <input type="file" id="exifXmpFileInput" accept="image/jpeg" class="mb-4 w-full" />
+    <input type="file" id="exifXmpFileInput" accept="image/jpeg" class="mb-2 w-full" />
+    <input type="file" id="exifXmpTxtInput" accept=".txt,.xmp" class="mb-2 w-full" />
+    <div class="text-xs text-gray-500 mb-2">Tip: load a JPG or XMP tags (.txt) exported from DJI/Pix4D.</div>
     <div id="exifXmpResults" class="space-y-4 text-sm"></div>
   </div>
 </aside>
