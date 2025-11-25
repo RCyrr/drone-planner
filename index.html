@@ -112,6 +112,8 @@ body { padding-top: 56px; }
       <button id="darkToggle" class="px-2 py-1 text-sm rounded bg-gray-200 dark:bg-gray-700" title="Toggle theme">🌙</button>
     </div>
   </div>
+  <!-- Elevation loading indicator (moved out of the Export tab so it is visible during fetch) -->
+  <div id="loadingElevation" style="display:none;margin-top:.5rem;font-weight:600" class="text-sm">Loading elevation data...</div>
 
   <!-- Tabs -->
   <div class="mb-3">
@@ -213,7 +215,6 @@ body { padding-top: 56px; }
       <button id="exportCsvBtnTop" class="export-btn px-3 py-1 rounded border">CSV Export</button>
       <button id="exportJsonBtnTop" class="export-btn px-3 py-1 rounded border">JSON Export</button>
     </div>
-    <div id="loadingElevation" class="hidden mt-2 font-semibold text-sm">Loading elevation data...</div>
   </div>
 
   <!-- Tab + theme script -->
@@ -1111,14 +1112,122 @@ function exifxmp_init(maxTries = 20) {
     openBtn.classList.add('hidden');
   });
 
+// Helper: robustly extract embedded XMP packet from a JPEG ArrayBuffer by searching byte sequences
+function extractXmpFromArrayBuffer(ab) {
+  try {
+    if (!ab || !ab.byteLength) return null;
+    const bytes = new Uint8Array(ab);
+    // ASCII bytes for "<x:xmpmeta" and "</x:xmpmeta>"
+    const startSeq = new TextEncoder().encode('<x:xmpmeta');
+    const endSeq = new TextEncoder().encode('</x:xmpmeta>');
+    // helper to find sequence index
+    function indexOfSeq(arr, seq, from=0) {
+      for (let i = from; i <= arr.length - seq.length; i++) {
+        let ok = true;
+        for (let j = 0; j < seq.length; j++) {
+          if (arr[i + j] !== seq[j]) { ok = false; break; }
+        }
+        if (ok) return i;
+      }
+      return -1;
+    }
+    const start = indexOfSeq(bytes, startSeq, 0);
+    if (start === -1) return null;
+    const end = indexOfSeq(bytes, endSeq, start);
+    if (end === -1) return null;
+    // include end tag length
+    const slice = bytes.subarray(start, end + endSeq.length);
+    // decode as UTF-8 — XMP is ASCII/UTF-8
+    try {
+      return new TextDecoder('utf-8', {fatal:false}).decode(slice);
+    } catch(e) {
+      // fallback to basic decoding
+      let s = '';
+      for (let i=0;i<slice.length;i++) s += String.fromCharCode(slice[i]);
+      return s;
+    }
+  } catch (err) {
+    console.warn('extractXmpFromArrayBuffer failed', err);
+    return null;
+  }
+}
   exifXmpFileInput.addEventListener('change', async (e) => {
     const file = e.target.files[0];
     if (!file) return;
     try {
+      // First try exifr for structured EXIF/XMP
       const metadata = await exifr.parse(file, { xmp: true });
-      exifxmp_render(metadata);
+      exifxmp_lastMeta = metadata || {};
+
+      // Then read raw bytes and extract embedded XMP packet (more reliable for DJI tags)
+      let parsedDict = null;
+      try {
+        const ab = await file.arrayBuffer();
+        const xmpText = extractXmpFromArrayBuffer(ab);
+        if (xmpText) {
+          try {
+            const doc = new DOMParser().parseFromString(xmpText, 'application/xml');
+            parsedDict = {};
+            const elems = doc.getElementsByTagName('*');
+            for (let i = 0; i < elems.length; i++) {
+              const el = elems[i];
+              for (let j = 0; j < el.attributes.length; j++) {
+                const attr = el.attributes[j];
+                parsedDict[attr.name] = attr.value;
+                parsedDict[attr.localName] = attr.value;
+                if (attr.prefix) parsedDict[`${attr.prefix}:${attr.localName}`] = attr.value;
+              }
+            }
+          } catch (xmlErr) {
+            console.warn('DOMParser failed for embedded XMP bytes, falling back to key/value parse', xmlErr);
+            parsedDict = exifxmp_parseTxt(xmpText);
+          }
+        } else {
+          // Fallback: decode bytes as text and search for XMP/RDF blocks
+          const text = new TextDecoder().decode(ab);
+          const sx = text.indexOf('<x:xmpmeta');
+          const sr = text.indexOf('<rdf:RDF');
+          let block = null;
+          if (sx !== -1) {
+            const ex = text.indexOf('</x:xmpmeta>', sx);
+            block = ex !== -1 ? text.slice(sx, ex + '</x:xmpmeta>'.length) : text.slice(sx);
+          } else if (sr !== -1) {
+            const er = text.indexOf('</rdf:RDF>', sr);
+            block = er !== -1 ? text.slice(sr, er + '</rdf:RDF>'.length) : text.slice(sr);
+          }
+          if (block) {
+            try {
+              const doc = new DOMParser().parseFromString(block, 'application/xml');
+              parsedDict = {};
+              const elems = doc.getElementsByTagName('*');
+              for (let i = 0; i < elems.length; i++) {
+                const el = elems[i];
+                for (let j = 0; j < el.attributes.length; j++) {
+                  const attr = el.attributes[j];
+                  parsedDict[attr.name] = attr.value;
+                  parsedDict[attr.localName] = attr.value;
+                  if (attr.prefix) parsedDict[`${attr.prefix}:${attr.localName}`] = attr.value;
+                }
+              }
+            } catch (xmlErr) {
+              console.warn('DOMParser failed for block, falling back to key/value parse', xmlErr);
+              parsedDict = exifxmp_parseTxt(block);
+            }
+          } else {
+            parsedDict = exifxmp_parseTxt(text);
+          }
+        }
+      } catch (readErr) {
+        console.warn('ArrayBuffer/text extraction failed; falling back to exifr-only', readErr);
+      }
+
+      console.log('EXIF+XMP parsedDict keys:', Object.keys(parsedDict || {}).slice(0,40));
+      if (metadata && metadata.xmp) console.log('EXIFR xmp keys:', Object.keys(metadata.xmp || {}).slice(0,40));
+
+      // Render merged results (parsedDict takes precedence)
+      exifxmp_render(metadata || {}, parsedDict || {});
     } catch (err) {
-      console.error('Error reading metadata:', err);
+      console.error('Error reading metadata (exifr):', err);
       const resultsDiv = document.getElementById('exifXmpResults');
       if (resultsDiv) resultsDiv.innerHTML = `<div class="text-red-600">Error: ${err.message}</div>`;
     }
@@ -1142,6 +1251,48 @@ if (document.readyState === 'complete' || document.readyState === 'interactive')
   document.addEventListener('DOMContentLoaded', () => exifxmp_init());
   window.addEventListener('load', () => exifxmp_init());
 }
+
+// Handler: load a pasted / exported XMP text file and render immediately
+(function(){
+  function initTxtLoader() {
+    const txtInput = document.getElementById('exifXmpTxtInput');
+    if (!txtInput) return console.warn('exifXmpTxtInput not found');
+    txtInput.addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      try {
+        const text = await file.text();
+        // extract XMP or RDF block if present
+        const match = /<x:xmpmeta[\s\S]*?<\/x:xmpmeta>/i.exec(text) || /<rdf:RDF[\s\S]*?<\/rdf:RDF>/i.exec(text);
+        const xmp = match ? match[0] : text;
+        let parsedDict = {};
+        try {
+          const parser = new DOMParser();
+          const doc = parser.parseFromString(xmp, 'application/xml');
+          const elems = doc.getElementsByTagName('*');
+          for (let i=0;i<elems.length;i++){
+            const el = elems[i];
+            for (let j=0;j<el.attributes.length;j++){
+              const attr = el.attributes[j];
+              parsedDict[attr.name] = attr.value;
+              parsedDict[attr.localName] = attr.value;
+              if (attr.prefix) parsedDict[`${attr.prefix}:${attr.localName}`] = attr.value;
+            }
+          }
+        } catch (xmlErr) {
+          // fallback to regex key="value" parse
+          parsedDict = exifxmp_parseTxt(xmp);
+        }
+        console.log('Loaded XMP text keys:', Object.keys(parsedDict).slice(0,80));
+        exifxmp_render(exifxmp_lastMeta || {}, parsedDict);
+      } catch (err) {
+        console.error('Failed to read XMP text file:', err);
+      }
+    });
+  }
+  if (document.readyState === 'complete' || document.readyState === 'interactive') setTimeout(initTxtLoader, 0);
+  else document.addEventListener('DOMContentLoaded', initTxtLoader);
+})();
 </script>
 
 <!-- Tools Side Panel (right) -->

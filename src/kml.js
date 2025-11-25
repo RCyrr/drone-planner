@@ -132,7 +132,7 @@ export function exportKml(pointsToExport = [], stripElevations = {}, filename = 
  */
 function escapeXml(str) {
   if (str === undefined || str === null) return '';
-  // For element content, escaping &, <, > is sufficient
+  // Properly escape XML special characters for element content
   return String(str)
     .replace(/&/g, '&')
     .replace(/</g, '<')
