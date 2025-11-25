@@ -101,6 +101,7 @@ body { padding-top: 56px; }
       <option value="">Select tool...</option>
       <option value="exif-xmp-reader">EXIF+XMP READER</option>
     </select>
+    <button id="openToolPanelBtn" class="ml-2 px-2 py-1 text-sm rounded bg-blue-600 hover:bg-blue-700 text-white hidden">Open</button>
   </div>
 </div>
 <div id="sidebar" class="bg-white dark:bg-gray-800 p-4 overflow-y-auto">
@@ -961,9 +962,12 @@ function exifxmp_render(meta) {
 }
 function exifxmp_init(maxTries = 20) {
   const toolSelect = document.getElementById('toolSelect');
-  const exifXmpModal = document.getElementById('exifXmpModal');
+  const exifXmpPanel = document.getElementById('toolPanel');
+  const exifXmpClose = document.getElementById('exifXmpClose');
   const exifXmpFileInput = document.getElementById('exifXmpFileInput');
-  if (!toolSelect || !exifXmpModal || !exifXmpFileInput) {
+  const openBtn = document.getElementById('openToolPanelBtn');
+
+  if (!toolSelect || !exifXmpPanel || !exifXmpFileInput || !exifXmpClose || !openBtn) {
     if (maxTries > 0) {
       console.warn('EXIF/XMP init: elements not found, retrying...', maxTries);
       return setTimeout(() => exifxmp_init(maxTries - 1), 150);
@@ -973,17 +977,45 @@ function exifxmp_init(maxTries = 20) {
   }
   if (toolSelect.dataset.exifXmpInit === '1') return;
   toolSelect.dataset.exifXmpInit = '1';
+
+  // Ensure panel overlays map reliably
+  exifXmpPanel.style.zIndex = '2000';
+  exifXmpPanel.style.pointerEvents = 'auto';
+
+  function openPanel() {
+    exifXmpPanel.classList.remove('hidden');
+    exifXmpPanel.style.display = 'block';
+    try { exifXmpFileInput.focus(); } catch {}
+    console.log('EXIF/XMP panel: openPanel()');
+  }
+  function closePanel() {
+    exifXmpPanel.classList.add('hidden');
+    exifXmpPanel.style.display = 'none';
+    console.log('EXIF/XMP panel: closePanel()');
+  }
+
   toolSelect.addEventListener('change', (e) => {
+    console.log('toolSelect change ->', e.target.value);
     if (e.target.value === 'exif-xmp-reader') {
-      exifXmpModal.classList.remove('hidden');
+      openBtn.classList.remove('hidden');
+      openPanel();
+    } else {
+      openBtn.classList.add('hidden');
+      closePanel();
     }
   });
-  exifXmpModal.addEventListener('click', (e) => {
-    if (e.target === exifXmpModal) {
-      exifXmpModal.classList.add('hidden');
-      toolSelect.value = '';
-    }
+
+  openBtn.addEventListener('click', () => {
+    if (exifXmpPanel.classList.contains('hidden')) openPanel();
+    else closePanel();
   });
+
+  exifXmpClose.addEventListener('click', () => {
+    closePanel();
+    toolSelect.value = '';
+    openBtn.classList.add('hidden');
+  });
+
   exifXmpFileInput.addEventListener('change', async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -996,7 +1028,18 @@ function exifxmp_init(maxTries = 20) {
       if (resultsDiv) resultsDiv.innerHTML = `<div class="text-red-600">Error: ${err.message}</div>`;
     }
   });
-  console.log('EXIF/XMP toolbox initialized');
+
+  // Auto-open panel if the tool is already selected at load (browser may persist select value)
+  if (toolSelect.value === 'exif-xmp-reader') {
+    openBtn.classList.remove('hidden');
+    openPanel();
+    console.log('EXIF/XMP panel auto-opened due to pre-selected value');
+  } else {
+    openBtn.classList.add('hidden');
+    closePanel();
+  }
+
+  console.log('EXIF/XMP toolbox initialized (panel)');
 }
 if (document.readyState === 'complete' || document.readyState === 'interactive') {
   setTimeout(() => exifxmp_init(), 0);
@@ -1006,91 +1049,38 @@ if (document.readyState === 'complete' || document.readyState === 'interactive')
 }
 </script>
 
-<!-- EXIF/XMP Reader Modal -->
-<div id="exifXmpModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 hidden">
- <div class="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-   <div class="p-6">
-     <h3 class="text-lg font-semibold mb-4">EXIF+XMP READER</h3>
-     <input type="file" id="exifXmpFileInput" accept="image/jpeg" class="mb-4" />
-     <div id="exifXmpResults" class="space-y-4"></div>
-   </div>
- </div>
-</div>
+<!-- Tools Side Panel (right) -->
+<aside id="toolPanel" class="fixed top-[56px] right-0 bottom-0 w-[420px] bg-white dark:bg-gray-900 border-l border-gray-200 dark:border-gray-700 shadow-xl hidden z-[2000]">
+  <div class="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-700">
+    <h3 class="text-base font-semibold text-gray-800 dark:text-gray-100">EXIF+XMP READER</h3>
+    <button id="exifXmpClose" class="px-2 py-1 text-sm rounded bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-200">Close</button>
+  </div>
+  <div class="p-4 overflow-y-auto h-full">
+    <input type="file" id="exifXmpFileInput" accept="image/jpeg" class="mb-4 w-full" />
+    <div id="exifXmpResults" class="space-y-4 text-sm"></div>
+  </div>
+</aside>
 <script>
-(function () {
-  function map(meta) {
-    const x = meta && meta.xmp ? meta.xmp : {};
-    const drone = x.drone || x['drone-dji'] || x['aux'] || x;
-    return {
-      lat: (meta.latitude ?? meta.GPSLatitude ?? meta.gpsLatitude ?? null),
-      lon: (meta.longitude ?? meta.GPSLongitude ?? meta.gpsLongitude ?? null),
-      absAlt: (meta.GPSAltitude ?? meta.gpsAltitude ?? null),
-      relAlt: (drone?.relativeAltitude ?? x.RelativeAltitude ?? null),
-      flightDir: (drone?.flightDirection ?? x.FlightYawDegree ?? null),
-      gRoll: (drone?.gimbalRoll ?? x.GimbalRollDegree ?? null),
-      gPitch: (drone?.gimbalPitch ?? x.GimbalPitchDegree ?? null),
-      gYaw: (drone?.gimbalYaw ?? x.GimbalYawDegree ?? null),
-      gnssPosAcc: (drone?.gnssAccuracyPosition ?? x.GpsHAccuracy ?? null),
-      gnssHAcc: (drone?.gnssAccuracyHeight ?? x.GpsVAccuracy ?? null),
-      make: (meta.Make || meta.make || null),
-      model: (meta.Model || meta.model || null),
-      focal: (meta.FocalLength || meta.focalLength || null),
-    };
-  }
-  function render(meta) {
-    const resultsDiv = document.getElementById('exifXmpResults');
-    if (!resultsDiv) return;
-    const m = map(meta);
-    const fmt = (v, d=2, suf='') => (v!=null && !isNaN(v)) ? Number(v).toFixed(d)+suf : 'N/A';
-    resultsDiv.innerHTML = `
-      <div class="grid grid-cols-2 gap-4 text-sm">
-        <div><strong>GPS Coordinates:</strong> ${fmt(m.lat,8)}, ${fmt(m.lon,8)}</div>
-        <div><strong>Absolute Altitude:</strong> ${fmt(m.absAlt,2,' m')}</div>
-        <div><strong>Relative Altitude:</strong> ${fmt(m.relAlt,2,' m')}</div>
-        <div><strong>Camera Make:</strong> ${m.make || 'N/A'}</div>
-        <div><strong>Camera Model:</strong> ${m.model || 'N/A'}</div>
-        <div><strong>Focal Length:</strong> ${fmt(m.focal,2,' mm')}</div>
-        <div><strong>Flight Direction:</strong> ${fmt(m.flightDir,2,'°')}</div>
-        <div><strong>Gimbal Angles:</strong> ${fmt(m.gRoll,2,'°')}, ${fmt(m.gPitch,2,'°')}, ${fmt(m.gYaw,2,'°')}</div>
-        <div><strong>GNSS Accuracy Position:</strong> ${fmt(m.gnssPosAcc,2,' m')}</div>
-        <div><strong>GNSS Accuracy Height:</strong> ${fmt(m.gnssHAcc,2,' m')}</div>
-      </div>
-    `;
-  }
-  function init(maxTries=20){
-    const toolSelect = document.getElementById('toolSelect');
-    const exifXmpModal = document.getElementById('exifXmpModal');
-    const exifXmpFileInput = document.getElementById('exifXmpFileInput');
-    if (!toolSelect || !exifXmpModal || !exifXmpFileInput) {
-      if (maxTries>0) {
-        console.warn('EXIF/XMP init: elements not found, retrying...', maxTries);
-        return setTimeout(()=>init(maxTries-1),150);
+  // EXIF/XMP right-side panel: optional ESC to close
+  (function(){
+    function initEscClose(maxTries=20){
+      const panel = document.getElementById('toolPanel');
+      const closeBtn = document.getElementById('exifXmpClose');
+      const toolSelect = document.getElementById('toolSelect');
+      if (!panel || !closeBtn || !toolSelect) {
+        if (maxTries>0) return setTimeout(()=>initEscClose(maxTries-1),150);
+        return;
       }
-      console.warn('EXIF/XMP init: elements not found after retries');
-      return;
+      document.addEventListener('keydown', (e)=>{
+        if (e.key === 'Escape' && !panel.classList.contains('hidden')) {
+          panel.classList.add('hidden');
+          toolSelect.value = '';
+        }
+      });
     }
-    if (toolSelect.dataset.exifXmpInit==='1') return;
-    toolSelect.dataset.exifXmpInit='1';
-
-    toolSelect.addEventListener('change', (e)=>{
-      if (e.target.value==='exif-xmp-reader') exifXmpModal.classList.remove('hidden');
-    });
-    exifXmpModal.addEventListener('click', (e)=>{
-      if (e.target===exifXmpModal) { exifXmpModal.classList.add('hidden'); toolSelect.value=''; }
-    });
-    exifXmpFileInput.addEventListener('change', async (e)=>{
-      const file=e.target.files[0]; if(!file) return;
-      try { const meta=await exifr.parse(file,{xmp:true}); render(meta); }
-      catch(err){ console.error('Error reading metadata:',err);
-        const r=document.getElementById('exifXmpResults');
-        if(r) r.innerHTML = `<div class="text-red-600">Error: ${err.message}</div>`;
-      }
-    });
-    console.log('EXIF/XMP toolbox initialized (footer)');
-  }
-  if(document.readyState==='complete'||document.readyState==='interactive'){ setTimeout(()=>init(),0); }
-  else { document.addEventListener('DOMContentLoaded',()=>init()); window.addEventListener('load',()=>init()); }
-})();
+    if (document.readyState==='complete'||document.readyState==='interactive') setTimeout(()=>initEscClose(),0);
+    else { document.addEventListener('DOMContentLoaded',()=>initEscClose()); window.addEventListener('load',()=>initEscClose()); }
+  })();
 </script>
 </body>
 </html>
