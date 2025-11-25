@@ -905,7 +905,64 @@ document.getElementById('langToggle').onclick = () => {
 
 // initial check
 checkReady();
+
+// EXIF/XMP Reader Tool
+const toolSelect = document.getElementById('toolSelect');
+const exifXmpModal = document.getElementById('exifXmpModal');
+const exifXmpFileInput = document.getElementById('exifXmpFileInput');
+
+toolSelect.addEventListener('change', (e) => {
+  if (e.target.value === 'exif-xmp-reader') {
+    exifXmpModal.classList.remove('hidden');
+  }
+});
+
+exifXmpFileInput.addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  
+  try {
+    const metadata = await exifr.parse(file, { xmp: true });
+    const resultsDiv = document.getElementById('exifXmpResults');
+    resultsDiv.innerHTML = `
+      <div class="grid grid-cols-2 gap-4">
+        <div><strong>GPS Coordinates:</strong> ${metadata.gps?.latitude?.toFixed(8)}, ${metadata.gps?.longitude?.toFixed(8)}</div>
+        <div><strong>Absolute Altitude:</strong> ${metadata.gps?.altitude?.toFixed(2)} m</div>
+        <div><strong>Relative Altitude:</strong> ${metadata.xmp?.drone?.relativeAltitude?.toFixed(2)} m</div>
+        <div><strong>Camera Make:</strong> ${metadata.make || 'N/A'}</div>
+        <div><strong>Camera Model:</strong> ${metadata.model || 'N/A'}</div>
+        <div><strong>Focal Length:</strong> ${metadata.focalLength?.toFixed(2)} mm</div>
+        <div><strong>Flight Direction:</strong> ${metadata.xmp?.drone?.flightDirection?.toFixed(2)}°</div>
+        <div><strong>Gimbal Angles:</strong> ${metadata.xmp?.drone?.gimbalRoll?.toFixed(2)}°, ${metadata.xmp?.drone?.gimbalPitch?.toFixed(2)}°, ${metadata.xmp?.drone?.gimbalYaw?.toFixed(2)}°</div>
+        <div><strong>GNSS Accuracy Position:</strong> ${metadata.xmp?.drone?.gnssAccuracyPosition?.toFixed(2)} m</div>
+        <div><strong>GNSS Accuracy Height:</strong> ${metadata.xmp?.drone?.gnssAccuracyHeight?.toFixed(2)} m</div>
+      </div>
+    `;
+  } catch (error) {
+    console.error('Error reading metadata:', error);
+    document.getElementById('exifXmpResults').innerHTML = `<div class="text-red-600">Error: ${error.message}</div>`;
+  }
+});
+
+// Close modal when clicking outside
+exifXmpModal.addEventListener('click', (e) => {
+  if (e.target === exifXmpModal) {
+    exifXmpModal.classList.add('hidden');
+    toolSelect.value = '';
+  }
+});
 </script>
+
+<!-- EXIF/XMP Reader Modal -->
+<div id="exifXmpModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 hidden">
+ <div class="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+   <div class="p-6">
+     <h3 class="text-lg font-semibold mb-4">EXIF+XMP READER</h3>
+     <input type="file" id="exifXmpFileInput" accept="image/jpeg" class="mb-4" />
+     <div id="exifXmpResults" class="space-y-4"></div>
+   </div>
+ </div>
+</div>
 </body>
 </html>
 
