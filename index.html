@@ -54,6 +54,9 @@ button#applyFilterBtn {
   font-weight: 600;
   box-shadow: 0 1px 2px rgba(0,0,0,0.08);
 }
+
+/* Offset content for fixed top toolbar */
+body { padding-top: 56px; }
 </style>
   <!-- Tailwind CSS (CDN) + config for class-based dark mode -->
   <script>
@@ -90,6 +93,16 @@ button#applyFilterBtn {
   </script>
 </head>
 <body>
+<!-- Top toolbox bar -->
+<div id="topToolbar" class="fixed top-0 left-0 right-0 z-50 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 py-2 px-4 flex items-center justify-between">
+  <div class="flex items-center space-x-3">
+    <span class="font-medium text-gray-700 dark:text-gray-200">Tools</span>
+    <select id="toolSelect" class="border rounded px-2 py-1 text-sm dark:bg-gray-800 dark:border-gray-600">
+      <option value="">Select tool...</option>
+      <option value="exif-xmp-reader">EXIF+XMP READER</option>
+    </select>
+  </div>
+</div>
 <div id="sidebar" class="bg-white dark:bg-gray-800 p-4 overflow-y-auto">
   <div class="flex items-center justify-between mb-3">
     <h2 class="text-lg font-semibold text-gray-800 dark:text-gray-100">Drone Planner</h2>
@@ -906,51 +919,71 @@ document.getElementById('langToggle').onclick = () => {
 // initial check
 checkReady();
 
-// EXIF/XMP Reader Tool
-const toolSelect = document.getElementById('toolSelect');
-const exifXmpModal = document.getElementById('exifXmpModal');
-const exifXmpFileInput = document.getElementById('exifXmpFileInput');
-
-toolSelect.addEventListener('change', (e) => {
-  if (e.target.value === 'exif-xmp-reader') {
-    exifXmpModal.classList.remove('hidden');
+// EXIF/XMP Reader Tool (safe init)
+(function() {
+  const toolSelect = document.getElementById('toolSelect');
+  const exifXmpModal = document.getElementById('exifXmpModal');
+  const exifXmpFileInput = document.getElementById('exifXmpFileInput');
+  if (!toolSelect || !exifXmpModal || !exifXmpFileInput) {
+    console.warn('Toolbox elements not found; skipping EXIF/XMP init');
+    return;
   }
-});
 
-exifXmpFileInput.addEventListener('change', async (e) => {
-  const file = e.target.files[0];
-  if (!file) return;
-  
-  try {
-    const metadata = await exifr.parse(file, { xmp: true });
-    const resultsDiv = document.getElementById('exifXmpResults');
-    resultsDiv.innerHTML = `
-      <div class="grid grid-cols-2 gap-4">
-        <div><strong>GPS Coordinates:</strong> ${metadata.gps?.latitude?.toFixed(8)}, ${metadata.gps?.longitude?.toFixed(8)}</div>
-        <div><strong>Absolute Altitude:</strong> ${metadata.gps?.altitude?.toFixed(2)} m</div>
-        <div><strong>Relative Altitude:</strong> ${metadata.xmp?.drone?.relativeAltitude?.toFixed(2)} m</div>
-        <div><strong>Camera Make:</strong> ${metadata.make || 'N/A'}</div>
-        <div><strong>Camera Model:</strong> ${metadata.model || 'N/A'}</div>
-        <div><strong>Focal Length:</strong> ${metadata.focalLength?.toFixed(2)} mm</div>
-        <div><strong>Flight Direction:</strong> ${metadata.xmp?.drone?.flightDirection?.toFixed(2)}°</div>
-        <div><strong>Gimbal Angles:</strong> ${metadata.xmp?.drone?.gimbalRoll?.toFixed(2)}°, ${metadata.xmp?.drone?.gimbalPitch?.toFixed(2)}°, ${metadata.xmp?.drone?.gimbalYaw?.toFixed(2)}°</div>
-        <div><strong>GNSS Accuracy Position:</strong> ${metadata.xmp?.drone?.gnssAccuracyPosition?.toFixed(2)} m</div>
-        <div><strong>GNSS Accuracy Height:</strong> ${metadata.xmp?.drone?.gnssAccuracyHeight?.toFixed(2)} m</div>
-      </div>
-    `;
-  } catch (error) {
-    console.error('Error reading metadata:', error);
-    document.getElementById('exifXmpResults').innerHTML = `<div class="text-red-600">Error: ${error.message}</div>`;
-  }
-});
+  toolSelect.addEventListener('change', (e) => {
+    if (e.target.value === 'exif-xmp-reader') {
+      exifXmpModal.classList.remove('hidden');
+    }
+  });
 
-// Close modal when clicking outside
-exifXmpModal.addEventListener('click', (e) => {
-  if (e.target === exifXmpModal) {
-    exifXmpModal.classList.add('hidden');
-    toolSelect.value = '';
-  }
-});
+  exifXmpFileInput.addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      const metadata = await exifr.parse(file, { xmp: true });
+      const resultsDiv = document.getElementById('exifXmpResults');
+
+      const lat = (metadata.latitude ?? metadata.GPSLatitude);
+      const lon = (metadata.longitude ?? metadata.GPSLongitude);
+      const absAlt = (metadata.GPSAltitude ?? metadata.RelativeAltitude ?? metadata.gpsAltitude);
+
+      const x = metadata.xmp || {};
+      const drone = x.drone || x['drone-dji'] || x['aux'] || x;
+      const relAlt = drone?.relativeAltitude ?? x.RelativeAltitude ?? null;
+      const flightDir = drone?.flightDirection ?? x.FlightYawDegree ?? null;
+      const gRoll = drone?.gimbalRoll ?? x.GimbalRollDegree ?? null;
+      const gPitch = drone?.gimbalPitch ?? x.GimbalPitchDegree ?? null;
+      const gYaw = drone?.gimbalYaw ?? x.GimbalYawDegree ?? null;
+      const gnssPosAcc = drone?.gnssAccuracyPosition ?? x.GpsHAccuracy ?? null;
+      const gnssHAcc = drone?.gnssAccuracyHeight ?? x.GpsVAccuracy ?? null;
+
+      resultsDiv.innerHTML = `
+        <div class="grid grid-cols-2 gap-4 text-sm">
+          <div><strong>GPS Coordinates:</strong> ${lat!=null?Number(lat).toFixed(8):'N/A'}, ${lon!=null?Number(lon).toFixed(8):'N/A'}</div>
+          <div><strong>Absolute Altitude:</strong> ${absAlt!=null?Number(absAlt).toFixed(2)+' m':'N/A'}</div>
+          <div><strong>Relative Altitude:</strong> ${relAlt!=null?Number(relAlt).toFixed(2)+' m':'N/A'}</div>
+          <div><strong>Camera Make:</strong> ${metadata.Make || metadata.make || 'N/A'}</div>
+          <div><strong>Camera Model:</strong> ${metadata.Model || metadata.model || 'N/A'}</div>
+          <div><strong>Focal Length:</strong> ${metadata.FocalLength || metadata.focalLength ? Number(metadata.FocalLength || metadata.focalLength).toFixed(2)+' mm':'N/A'}</div>
+          <div><strong>Flight Direction:</strong> ${flightDir!=null?Number(flightDir).toFixed(2)+'°':'N/A'}</div>
+          <div><strong>Gimbal Angles:</strong> ${(gRoll!=null?Number(gRoll).toFixed(2):'N/A')}°, ${(gPitch!=null?Number(gPitch).toFixed(2):'N/A')}°, ${(gYaw!=null?Number(gYaw).toFixed(2):'N/A')}°</div>
+          <div><strong>GNSS Accuracy Position:</strong> ${gnssPosAcc!=null?Number(gnssPosAcc).toFixed(2)+' m':'N/A'}</div>
+          <div><strong>GNSS Accuracy Height:</strong> ${gnssHAcc!=null?Number(gnssHAcc).toFixed(2)+' m':'N/A'}</div>
+        </div>
+      `;
+    } catch (error) {
+      console.error('Error reading metadata:', error);
+      document.getElementById('exifXmpResults').innerHTML = `<div class="text-red-600">Error: ${error.message}</div>`;
+    }
+  });
+
+  // Close modal when clicking outside
+  exifXmpModal.addEventListener('click', (e) => {
+    if (e.target === exifXmpModal) {
+      exifXmpModal.classList.add('hidden');
+      toolSelect.value = '';
+    }
+  });
+})();
 </script>
 
 <!-- EXIF/XMP Reader Modal -->
@@ -965,4 +998,3 @@ exifXmpModal.addEventListener('click', (e) => {
 </div>
 </body>
 </html>
-
