@@ -9,6 +9,8 @@ Drone Planner is a browser-based application for creating and managing drone fli
 - Automatic flight strip calculation with configurable parameters
 - Photo point generation with overlap configuration
 - Elevation data integration from Open Elevation API
+- EXIF+XMP READER tool for detailed metadata inspection of single JPG images (including GPS, altitude, attitude, camera and RTK/XMP tags)
+- DISPLAY DRONE FLIGHT tool for folder-based JPG import and flight visualization (blue photo markers, skipped-image log, summary integration)
 - Export options (CSV, JSON, KML with elevation)
 - Photo point filtering for streamlined missions
 - Multilingual UI (English/German)
@@ -18,7 +20,7 @@ Drone Planner is a browser-based application for creating and managing drone fli
 - Vanilla JavaScript
 - Leaflet.js for map rendering
 - Turf.js for geospatial calculations
-- Exifr for EXIF reading
+- Exifr for EXIF/XMP reading
 - shapefile.js for shapefile import
 
 ## File Layout
@@ -33,6 +35,41 @@ Drone Planner is a browser-based application for creating and managing drone fli
 4. Click "Calculate Flight Strips" to generate strips and photo points.
 5. The app fetches terrain elevation data and computes absolute altitudes.
 6. Export results (CSV, JSON, KML). KML includes altitude and altitudeMode to show 3D in Google Earth.
+
+## Tools
+
+### EXIF+XMP READER
+
+A dedicated tool for inspecting the metadata of a **single JPG image**:
+
+- Opens via the top **Tools** dropdown in the UI.
+- Uses `exifr` with `xmp: true` plus a custom XMP extractor to read:
+  - GPS coordinates (lat/lon)
+  - Absolute and relative altitude (DJI XMP tags where available)
+  - Flight attitude (yaw/roll/pitch) and gimbal angles
+  - GNSS / RTK quality information
+  - Camera and exposure parameters (make, model, ISO, shutter, f-number)
+- Renders a compact summary plus an optional expandable section that lists **all parsed XMP tags** in a table.
+- Intended primarily for debugging and understanding how a specific image was captured.
+
+### DISPLAY DRONE FLIGHT
+
+A separate tool for visualizing a **complete drone flight** from a folder of JPGs:
+
+- Opens via the top **Tools** dropdown as "DISPLAY DRONE FLIGHT".
+- Accepts a folder or multi-selection of JPG/JPEG images and:
+  - Filters to top-level JPG/JPEG files (subfolders are ignored).
+  - Processes images in batches with limited concurrency to keep the UI responsive.
+  - Uses the same EXIF+XMP pipeline as the EXIF+XMP READER to obtain GPS and altitude.
+  - Creates blue `Leaflet` markers for every image that has valid GPS coordinates.
+- Integrates with the existing app state:
+  - Updates the global photo-point list and the summary panel (`numPhotos`, etc.).
+  - Shows a **skipped images** list with reasons (e.g., "no-gps" or parse errors).
+  - Fits the map view to the footprint of all successfully imported images.
+- Designed to handle flights with up to approximately 1000 images smoothly in modern browsers when hosted as static files (e.g., GitHub Pages), thanks to:
+  - Bounded concurrency
+  - Batched parsing with brief yields between batches
+  - A configurable hard cap on the maximum number of imported images
 
 ## Elevation integration details
 - Batch requests to Open Elevation API endpoint `https://api.open-elevation.com/api/v1/lookup` (POST JSON: { locations: [{latitude, longitude}, ...] }).
