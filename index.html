@@ -725,11 +725,11 @@ calcBtn.onclick = async () => {
   // Convert the Leaflet polygon to GeoJSON polygon to pass to the module
   const polygonGeoJSON = polygon.toGeoJSON().geometry;
   try {
-    // Ensure module binding exists (dynamic import fallback in case head bootstrap failed)
+    // Use module function wired in head script; if missing, surface clear error
     if (!window.calculateStripsModule) {
-      const mod = await import('./src/strips.js');
-      window.calculateStripsModule = mod.calculateStrips;
-      console.log('Loaded strips module dynamically as fallback');
+      console.error('calculateStripsModule is not available. Check that the <script type="module"> in <head> loaded ./src/strips.js correctly.');
+      stripOutput.innerHTML = 'Error: flight-strip module not loaded. Please reload the page.';
+      return;
     }
     const result = window.calculateStripsModule(polygonGeoJSON, drone, options);
     const { photoPoints, stripLines, summaryStats: newSummary } = result;
@@ -1145,17 +1145,6 @@ function exifxmp_init(maxTries = 20) {
     openBtn.classList.add('hidden');
   });
 
-  // Wire EXIF panel visible button to the hidden file input
-  // (button #exifXmpSelectBtn triggers click on hidden #exifXmpFileInput)
-  try {
-    const selectBtn = document.getElementById('exifXmpSelectBtn');
-    if (selectBtn && exifXmpFileInput) {
-      selectBtn.addEventListener('click', () => exifXmpFileInput.click());
-    }
-  } catch (e) {
-    console.warn('Failed to wire exif select button:', e);
-  }
-
   // Auto-open panel if the tool is already selected at load
   if (toolSelect.value === 'exif-xmp-reader') {
     openBtn.classList.remove('hidden');
@@ -1300,6 +1289,8 @@ function extractXmpFromArrayBuffer(ab) {
     }
   });
 
+</script>
+
 
 
 <!-- Tools Side Panel (right) - EXIF+XMP READER (exclusive) -->
@@ -1309,9 +1300,8 @@ function extractXmpFromArrayBuffer(ab) {
     <button id="exifXmpClose" class="px-2 py-1 text-sm rounded bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-200">Close</button>
   </div>
   <div class="p-4 overflow-y-auto h-full">
-    <!-- Hidden file input + visible action button per request -->
-    <input type="file" id="exifXmpFileInput" accept="image/jpeg" class="hidden" />
-    <button id="exifXmpSelectBtn" class="mb-2 w-full px-3 py-2 rounded bg-blue-600 text-white">Select JPG Image</button>
+    <!-- Single JPG input for EXIF+XMP parsing -->
+    <input type="file" id="exifXmpFileInput" accept="image/jpeg" class="mb-2 w-full" />
     <div class="text-xs text-gray-500 mb-2">Tip: Select a JPG image to read EXIF/XMP from the file.</div>
     <div id="exifXmpResults" class="space-y-4 text-sm"></div>
   </div>
