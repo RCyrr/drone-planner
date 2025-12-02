@@ -436,7 +436,9 @@ const layerStrips = L.layerGroup().addTo(map);
 const layerPhotos = L.layerGroup().addTo(map);
 // Flight area layer (yellow styling)
 const layerFlightArea = L.layerGroup().addTo(map);
-const overlays = { "Streifen": layerStrips, "Fotopunkte": layerPhotos, "Flight area": layerFlightArea };
+// Layer for validated Ground Control Points (GCPs)
+const layerGcp = L.layerGroup().addTo(map);
+const overlays = { "Streifen": layerStrips, "Fotopunkte": layerPhotos, "Flight area": layerFlightArea, "GCPs": layerGcp };
 L.control.layers({}, overlays, { collapsed:false }).addTo(map);
 // simple runtime session container (not persisted)
 window.__DRONE_SESSION = window.__DRONE_SESSION || {};
@@ -1332,19 +1334,20 @@ if (document.readyState === 'complete' || document.readyState === 'interactive')
       res.push(cur.trim());
       return res.map(s => s.replace(/^"(.*)"$/, '$1'));
     };
-    const header = parseLine(lines[0]).map(h => h.toLowerCase());
+    const originalHeader = parseLine(lines[0]);
+    const headerLower = originalHeader.map(h => h.toLowerCase());
     const expected = ['pointid','latitude','longitude','elevation','description'];
     // Allow headers that contain these columns in any order but all must exist
-    const missing = expected.filter(col => !header.includes(col));
+    const missing = expected.filter(col => !headerLower.includes(col));
     if (missing.length > 0) return { error: `Missing columns: ${missing.join(', ')}` };
     const rows = [];
     for (let i=1;i<lines.length;i++) {
       const vals = parseLine(lines[i]);
       const obj = {};
-      header.forEach((h, idx) => { obj[h] = vals[idx] !== undefined ? vals[idx] : ''; });
+      headerLower.forEach((h, idx) => { obj[h] = vals[idx] !== undefined ? vals[idx] : ''; });
       rows.push(obj);
     }
-    return { header, rows };
+    return { header: originalHeader, headerLower, rows };
   }
 
   // Validation function
@@ -1376,17 +1379,79 @@ if (document.readyState === 'complete' || document.readyState === 'interactive')
     return { valid, outside, invalidFormat };
   }
 
-  // Wire up validate button / file input
-  gcpValidateBtn.addEventListener('click', async () => {
+  // Keep parsed rows in closure for preview -> validation
+  let currentGcpRows = null;
+  let currentGcpHeaderOriginal = null;
+  let currentGcpHeaderLower = null;
+
+  // Show preview when file selected
+  gcpFileInput.addEventListener('change', async () => {
     const f = gcpFileInput.files && gcpFileInput.files[0];
-    if (!f) { gcpResults.innerHTML = '<div class="warning">Please select a CSV file first.</div>'; return; }
+    if (!f) { gcpPreview.innerHTML = '<div class="text-xs">No file selected</div>'; currentGcpRows = null; return; }
     try {
       const txt = await f.text();
       const parsed = parseCsv(txt);
-      if (parsed.error) { gcpResults.innerHTML = `<div class="warning">CSV parse error: ${parsed.error}</div>`; return; }
+      if (parsed.error) { gcpPreview.innerHTML = `<div class="warning">CSV parse error: ${parsed.error}</div>`; currentGcpRows = null; return; }
+      currentGcpRows = parsed.rows;
+      currentGcpHeaderOriginal = parsed.header;
+      currentGcpHeaderLower = parsed.headerLower;
+      // Build table (all rows) with horizontal + vertical scroll by parent
+      const table = document.createElement('table');
+      table.style.width = '100%';
+      table.style.borderCollapse = 'collapse';
+      table.style.fontSize = '12px';
+      table.style.minWidth = '600px'; // allow horizontal scroll if many columns
+      const thead = document.createElement('thead');
+      const thr = document.createElement('tr');
+      currentGcpHeaderOriginal.forEach(h => {
+        const th = document.createElement('th');
+        th.textContent = h;
+        th.style.borderBottom = '1px solid #ddd';
+        th.style.padding = '4px';
+        th.style.textAlign = 'left';
+        thr.appendChild(th);
+      });
+      thead.appendChild(thr);
+      table.appendChild(thead);
+      const tbody = document.createElement('tbody');
+      currentGcpRows.forEach(row => {
+        const tr = document.createElement('tr');
+        currentGcpHeaderLower.forEach(h => {
+          const td = document.createElement('td');
+          td.textContent = row[h] ?? '';
+          td.style.padding = '4px';
+          td.style.borderBottom = '1px solid #f4f4f4';
+          tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+      gcpPreview.innerHTML = '';
+      gcpPreview.appendChild(table);
+    } catch (err) {
+      console.error('Failed to read CSV file for preview', err);
+      gcpPreview.innerHTML = `<div class="warning">Preview failed: ${err.message}</div>`;
+      currentGcpRows = null;
+    }
+  });
+
+  // small helper to create a triangular SVG icon for GCPs
+  function createTriangleIcon(color='purple', size=8) {
+    const svg = `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><polygon points="${size/2},0 ${size},${size} 0,${size}" fill="${color}" stroke="#000" stroke-width="0.6"/></svg>`;
+    return L.divIcon({ className: 'gcp-triangle-icon', html: svg, iconSize: [size, size], iconAnchor: [size/2, size] });
+  }
+
+  // Wire up validate button / use preview rows
+  gcpValidateBtn.addEventListener('click', async () => {
+    if (!currentGcpRows || !Array.isArray(currentGcpRows) || currentGcpRows.length === 0) {
+      gcpResults.innerHTML = '<div class="warning">Please select a CSV file and check the preview first.</div>';
+      return;
+    }
+    try {
       const swap = !!gcpSwap.checked;
-      const res = await validateGcpRows(parsed.rows, swap);
+      const res = await validateGcpRows(currentGcpRows, swap);
       if (res.error) { gcpResults.innerHTML = `<div class="warning">${res.error}</div>`; return; }
+      // Render results text
       const outHtml = [];
       outHtml.push(`<div><strong>GCP validation results</strong></div>`);
       outHtml.push(`<div>Valid points: <strong>${res.valid.length}</strong></div>`);
@@ -1403,6 +1468,19 @@ if (document.readyState === 'complete' || document.readyState === 'interactive')
         outHtml.push('</div></details>');
       }
       gcpResults.innerHTML = outHtml.join('');
+
+      // Draw validated GCPs (purple triangles size 16). Clear previous GCP markers first.
+      try {
+        if (typeof layerGcp !== 'undefined' && layerGcp.clearLayers) layerGcp.clearLayers();
+        res.valid.forEach(p => {
+          if (!isFinite(p.lat) || !isFinite(p.lon)) return;
+          const marker = L.marker([p.lat, p.lon], { icon: createTriangleIcon('purple', 16) }).addTo(layerGcp);
+          if (p.id) marker.bindTooltip(String(p.id), { permanent: false, direction: 'top' });
+        });
+      } catch (drawErr) {
+        console.warn('Failed to draw GCP markers', drawErr);
+      }
+
     } catch (err) {
       console.error('GCP validation failed', err);
       gcpResults.innerHTML = `<div class="warning">Validation failed: ${err.message}</div>`;
@@ -1506,6 +1584,8 @@ function extractXmpFromArrayBuffer(ab) {
     <label class="block text-sm font-medium mb-2">Import ground control points (.csv)</label>
     <input type="file" id="gcpFileInput" accept=".csv,text/csv" class="mb-2 w-full" />
     <div class="text-xs text-gray-500 mb-2">Expected CSV header: pointID,latitude,longitude,elevation,description</div>
+    <!-- Preview table (scrollable both axes) -->
+    <div id="gcpPreview" class="mb-2" style="max-height:240px; overflow:auto; border:1px solid #eee; padding:6px; background:#fff;"></div>
     <div class="flex items-center mb-2 space-x-2">
       <label class="text-sm"><input type="checkbox" id="gcpSwapCoords" /> Swap latitude/longitude</label>
       <button id="gcpValidateBtn" class="ml-auto px-3 py-1 rounded border text-sm">Validate GCP</button>
