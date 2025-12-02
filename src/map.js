@@ -22,10 +22,15 @@ export function initMap() {
 
   const layerStrips = L.layerGroup().addTo(map);
   const layerPhotos = L.layerGroup().addTo(map);
-  const overlays = { "Streifen": layerStrips, "Fotopunkte": layerPhotos };
+  // Flight area layer (separate styling, shown in yellow)
+  const layerFlightArea = L.layerGroup().addTo(map);
+  const overlays = { "Streifen": layerStrips, "Fotopunkte": layerPhotos, "Flight area": layerFlightArea };
   L.control.layers({}, overlays, { collapsed: false }).addTo(map);
-
-  return { map, drawnItems, layerStrips, layerPhotos, drawControl };
+ 
+  // Ensure a simple in-memory session container exists for runtime session data
+  window.__DRONE_SESSION = window.__DRONE_SESSION || {};
+ 
+  return { map, drawnItems, layerStrips, layerPhotos, layerFlightArea, drawControl };
 }
 
 /**
@@ -38,7 +43,7 @@ export function initMap() {
  *  - callbacks: { onCalculate: fn, onExportKml: fn, onPolygonCreated: fn }
  */
 export function bindUI({ mapObjects, uiElements, callbacks }) {
-  const { map, drawnItems, drawControl } = mapObjects;
+  const { map, drawnItems, drawControl, layerFlightArea } = mapObjects;
   const { calcBtn, exportKmlBtn } = uiElements;
   const { onCalculate, onExportKml, onPolygonCreated } = callbacks || {};
 
@@ -52,8 +57,27 @@ export function bindUI({ mapObjects, uiElements, callbacks }) {
 
   map.on(L.Draw.Event.CREATED, function (e) {
     if (e.layer instanceof L.Polygon) {
+      // Clear existing drawn items and replace with the newly drawn polygon
       drawnItems.clearLayers();
       drawnItems.addLayer(e.layer);
+ 
+      // Update the dedicated flight area layer (yellow styled polygon)
+      try {
+        if (typeof layerFlightArea !== 'undefined' && layerFlightArea.clearLayers) {
+          layerFlightArea.clearLayers();
+          const geo = e.layer.toGeoJSON();
+          const styled = L.geoJSON(geo, {
+            style: { color: 'yellow', weight: 2, opacity: 0.9, fillOpacity: 0.15 }
+          });
+          layerFlightArea.addLayer(styled);
+          // Store the flight area polygon in a runtime session object under key 'flight area'
+          window.__DRONE_SESSION = window.__DRONE_SESSION || {};
+          window.__DRONE_SESSION['flight area'] = geo;
+        }
+      } catch (err) {
+        console.error('Failed to set flight area layer or session value', err);
+      }
+ 
       if (onPolygonCreated) onPolygonCreated(e.layer);
     }
   });

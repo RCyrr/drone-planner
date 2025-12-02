@@ -101,6 +101,7 @@ body { padding-top: 56px; }
       <option value="">Select tool...</option>
       <option value="exif-xmp-reader">EXIF+XMP READER</option>
       <option value="display-drone-flight">DISPLAY DRONE FLIGHT</option>
+      <option value="gcp-validator">GCP VALIDATOR</option>
     </select>
     <button id="openToolPanelBtn" class="ml-2 px-2 py-1 text-sm rounded bg-blue-600 hover:bg-blue-700 text-white hidden">Open</button>
   </div>
@@ -433,8 +434,12 @@ let polygon=null;
 // LayerGroups für Streifen & Fotos
 const layerStrips = L.layerGroup().addTo(map);
 const layerPhotos = L.layerGroup().addTo(map);
-const overlays = { "Streifen": layerStrips, "Fotopunkte": layerPhotos };
+// Flight area layer (yellow styling)
+const layerFlightArea = L.layerGroup().addTo(map);
+const overlays = { "Streifen": layerStrips, "Fotopunkte": layerPhotos, "Flight area": layerFlightArea };
 L.control.layers({}, overlays, { collapsed:false }).addTo(map);
+// simple runtime session container (not persisted)
+window.__DRONE_SESSION = window.__DRONE_SESSION || {};
 
 // UI-Elemente
 const drawBtn = document.getElementById('drawPolygonBtn');
@@ -1251,6 +1256,161 @@ if (document.readyState === 'complete' || document.readyState === 'interactive')
   window.addEventListener('load', () => exifxmp_init());
 }
 
+// --- GCP Validator: independent initialization & handlers (works alongside existing panel management) ---
+(function initGcpValidator() {
+  const toolSelect = document.getElementById('toolSelect');
+  const openBtn = document.getElementById('openToolPanelBtn');
+  const toolPanel = document.getElementById('toolPanel');
+  const displayPanel = document.getElementById('displayPanel');
+  const gcpPanel = document.getElementById('gcpPanel');
+  const gcpClose = document.getElementById('gcpClose');
+  const gcpFileInput = document.getElementById('gcpFileInput');
+  const gcpValidateBtn = document.getElementById('gcpValidateBtn');
+  const gcpSwap = document.getElementById('gcpSwapCoords');
+  const gcpResults = document.getElementById('gcpResults');
+
+  if (!toolSelect || !openBtn || !gcpPanel || !gcpClose || !gcpFileInput || !gcpValidateBtn || !gcpResults) {
+    // Defer init if DOM not ready
+    if (document.readyState === 'complete' || document.readyState === 'interactive') {
+      console.warn('GCP Validator elements not found; initialization skipped');
+    } else {
+      document.addEventListener('DOMContentLoaded', initGcpValidator);
+    }
+    return;
+  }
+
+  // toggle open button visibility when GCP tool is selected
+  toolSelect.addEventListener('change', (e) => {
+    if (e.target.value === 'gcp-validator') openBtn.classList.remove('hidden');
+    else {
+      // hide open button only if no other tool selected
+      if (e.target.value === '') openBtn.classList.add('hidden');
+    }
+  });
+
+  function showGcpPanel() {
+    // hide other panels
+    if (toolPanel) { toolPanel.classList.add('hidden'); toolPanel.style.display = 'none'; }
+    if (displayPanel) { displayPanel.classList.add('hidden'); displayPanel.style.display = 'none'; }
+    gcpPanel.classList.remove('hidden'); gcpPanel.style.display = 'block';
+    try { gcpFileInput.focus(); } catch {}
+  }
+  function closeGcpPanel() {
+    gcpPanel.classList.add('hidden'); gcpPanel.style.display = 'none';
+  }
+
+  // open button toggles GCP panel if selected
+  openBtn.addEventListener('click', () => {
+    if (toolSelect.value === 'gcp-validator') {
+      if (gcpPanel.classList.contains('hidden')) showGcpPanel();
+      else closeGcpPanel();
+    }
+  });
+
+  gcpClose.addEventListener('click', () => { closeGcpPanel(); toolSelect.value = ''; openBtn.classList.add('hidden'); });
+
+  // CSV parsing helper (simple, supports quoted fields)
+  function parseCsv(text) {
+    const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l.length>0);
+    if (lines.length === 0) return { error: 'Empty file' };
+    // naive CSV parse that handles quoted commas
+    const parseLine = (line) => {
+      const res = [];
+      let cur = '';
+      let inQuote = false;
+      for (let i=0;i<line.length;i++) {
+        const ch = line[i];
+        if (ch === '"' ) {
+          inQuote = !inQuote;
+        } else if (ch === ',' && !inQuote) {
+          res.push(cur.trim());
+          cur = '';
+        } else {
+          cur += ch;
+        }
+      }
+      res.push(cur.trim());
+      return res.map(s => s.replace(/^"(.*)"$/, '$1'));
+    };
+    const header = parseLine(lines[0]).map(h => h.toLowerCase());
+    const expected = ['pointid','latitude','longitude','elevation','description'];
+    // Allow headers that contain these columns in any order but all must exist
+    const missing = expected.filter(col => !header.includes(col));
+    if (missing.length > 0) return { error: `Missing columns: ${missing.join(', ')}` };
+    const rows = [];
+    for (let i=1;i<lines.length;i++) {
+      const vals = parseLine(lines[i]);
+      const obj = {};
+      header.forEach((h, idx) => { obj[h] = vals[idx] !== undefined ? vals[idx] : ''; });
+      rows.push(obj);
+    }
+    return { header, rows };
+  }
+
+  // Validation function
+  async function validateGcpRows(rows, swapCoords=false) {
+    const sessionPoly = window.__DRONE_SESSION && window.__DRONE_SESSION['flight area'];
+    if (!sessionPoly) {
+      return { error: 'No flight area polygon found. Please run DISPLAY DRONE FLIGHT and import images first.' };
+    }
+    if (typeof turf === 'undefined' || typeof turf.booleanPointInPolygon === 'undefined') {
+      return { error: 'Turf.js not available for geometric checks.' };
+    }
+    const valid = [];
+    const outside = [];
+    const invalidFormat = [];
+    for (const r of rows) {
+      const id = r['pointid'] || r['pointid'.toLowerCase()] || '';
+      let lat = parseFloat(r['latitude']);
+      let lon = parseFloat(r['longitude']);
+      if (swapCoords) { const tmp = lat; lat = lon; lon = tmp; }
+      if (!isFinite(lat) || !isFinite(lon)) {
+        invalidFormat.push(Object.assign({ _raw: r }, { id }));
+        continue;
+      }
+      const pt = turf.point([Number(lon), Number(lat)]);
+      const insidePoly = turf.booleanPointInPolygon(pt, sessionPoly);
+      if (insidePoly) valid.push({ id, lat, lon, raw: r });
+      else outside.push({ id, lat, lon, raw: r });
+    }
+    return { valid, outside, invalidFormat };
+  }
+
+  // Wire up validate button / file input
+  gcpValidateBtn.addEventListener('click', async () => {
+    const f = gcpFileInput.files && gcpFileInput.files[0];
+    if (!f) { gcpResults.innerHTML = '<div class="warning">Please select a CSV file first.</div>'; return; }
+    try {
+      const txt = await f.text();
+      const parsed = parseCsv(txt);
+      if (parsed.error) { gcpResults.innerHTML = `<div class="warning">CSV parse error: ${parsed.error}</div>`; return; }
+      const swap = !!gcpSwap.checked;
+      const res = await validateGcpRows(parsed.rows, swap);
+      if (res.error) { gcpResults.innerHTML = `<div class="warning">${res.error}</div>`; return; }
+      const outHtml = [];
+      outHtml.push(`<div><strong>GCP validation results</strong></div>`);
+      outHtml.push(`<div>Valid points: <strong>${res.valid.length}</strong></div>`);
+      outHtml.push(`<div>Outside flight area: <strong>${res.outside.length}</strong></div>`);
+      outHtml.push(`<div>Invalid format: <strong>${res.invalidFormat.length}</strong></div>`);
+      if (res.outside.length) {
+        outHtml.push('<details class="mt-2"><summary class="cursor-pointer text-xs">Show outside points</summary><div class="mt-1 max-h-40 overflow-auto"><table class="text-xs w-full"><thead><tr><th>ID</th><th>Lat</th><th>Lon</th></tr></thead><tbody>');
+        outHtml.push(res.outside.map(p=>`<tr><td>${p.id||''}</td><td>${p.lat}</td><td>${p.lon}</td></tr>`).join(''));
+        outHtml.push('</tbody></table></div></details>');
+      }
+      if (res.invalidFormat.length) {
+        outHtml.push('<details class="mt-2"><summary class="cursor-pointer text-xs">Show invalid-format rows</summary><div class="mt-1 max-h-40 overflow-auto text-xs">');
+        outHtml.push(res.invalidFormat.map(x=>`<div>${JSON.stringify(x._raw)}</div>`).join(''));
+        outHtml.push('</div></details>');
+      }
+      gcpResults.innerHTML = outHtml.join('');
+    } catch (err) {
+      console.error('GCP validation failed', err);
+      gcpResults.innerHTML = `<div class="warning">Validation failed: ${err.message}</div>`;
+    }
+  });
+
+})();
+
 // Helper: robustly extract embedded XMP packet from a JPEG ArrayBuffer by searching byte sequences
 function extractXmpFromArrayBuffer(ab) {
   try {
@@ -1333,6 +1493,24 @@ function extractXmpFromArrayBuffer(ab) {
     </div>
 
     <div id="displayToolNotes" class="text-xs text-gray-500">Parsed images will be immediately displayed on the map as blue markers.</div>
+  </div>
+</aside>
+
+<!-- GCP Validator Panel (right) -->
+<aside id="gcpPanel" class="fixed top-[56px] right-0 bottom-0 w-[420px] bg-white dark:bg-gray-900 border-l border-gray-200 dark:border-gray-700 shadow-xl hidden z-[2000]">
+  <div class="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-700">
+    <h3 class="text-base font-semibold text-gray-800 dark:text-gray-100">GCP VALIDATOR</h3>
+    <button id="gcpClose" class="px-2 py-1 text-sm rounded bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-200">Close</button>
+  </div>
+  <div class="p-4 overflow-y-auto h-full">
+    <label class="block text-sm font-medium mb-2">Import ground control points (.csv)</label>
+    <input type="file" id="gcpFileInput" accept=".csv,text/csv" class="mb-2 w-full" />
+    <div class="text-xs text-gray-500 mb-2">Expected CSV header: pointID,latitude,longitude,elevation,description</div>
+    <div class="flex items-center mb-2 space-x-2">
+      <label class="text-sm"><input type="checkbox" id="gcpSwapCoords" /> Swap latitude/longitude</label>
+      <button id="gcpValidateBtn" class="ml-auto px-3 py-1 rounded border text-sm">Validate GCP</button>
+    </div>
+    <div id="gcpResults" class="output bg-gray-50 dark:bg-gray-800 p-2 rounded text-sm"></div>
   </div>
 </aside>
 
@@ -1509,6 +1687,39 @@ function extractXmpFromArrayBuffer(ab) {
       if (parsedPoints.length > 0) {
         const group = L.featureGroup(parsedPoints.map(p => p.marker));
         map.fitBounds(group.getBounds().pad(0.1));
+        // Calculate flight area as convex hull around all imported image points and draw it (yellow)
+        try {
+          if (parsedPoints.length >= 3 && typeof turf !== 'undefined' && turf.convex) {
+            const pts = parsedPoints.map(p => turf.point([p.lng, p.lat]));
+            const fc = turf.featureCollection(pts);
+            const hull = turf.convex(fc);
+            if (hull) {
+              // clear previous flight area and render new one
+              window.__DRONE_SESSION = window.__DRONE_SESSION || {};
+              if (typeof layerFlightArea !== 'undefined' && layerFlightArea.clearLayers) layerFlightArea.clearLayers();
+              const styled = L.geoJSON(hull, { style: { color: 'yellow', weight: 2, opacity: 0.9, fillOpacity: 0.15 }});
+              if (typeof layerFlightArea !== 'undefined') layerFlightArea.addLayer(styled);
+              // store in runtime session under key 'flight area'
+              window.__DRONE_SESSION['flight area'] = hull;
+            }
+          } else {
+            // For 1-2 points, create a small buffer/convex shape
+            if (parsedPoints.length > 0) {
+              const pts = parsedPoints.map(p => turf.point([p.lng, p.lat]));
+              const fc = turf.featureCollection(pts);
+              const buffered = turf.buffer(fc, 0.001, { units: 'kilometers' }); // tiny buffer
+              if (buffered) {
+                window.__DRONE_SESSION = window.__DRONE_SESSION || {};
+                if (typeof layerFlightArea !== 'undefined' && layerFlightArea.clearLayers) layerFlightArea.clearLayers();
+                const styled = L.geoJSON(buffered, { style: { color: 'yellow', weight: 2, opacity: 0.9, fillOpacity: 0.15 }});
+                if (typeof layerFlightArea !== 'undefined') layerFlightArea.addLayer(styled);
+                window.__DRONE_SESSION['flight area'] = buffered;
+              }
+            }
+          }
+        } catch (e) {
+          console.warn('Failed to compute/draw flight area polygon', e);
+        }
       }
     } catch (err) {
       console.warn('fitBounds failed', err);
