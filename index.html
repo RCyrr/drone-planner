@@ -102,6 +102,7 @@ body { padding-top: 56px; }
       <option value="exif-xmp-reader">EXIF+XMP READER</option>
       <option value="display-drone-flight">DISPLAY DRONE FLIGHT</option>
       <option value="gcp-validator">GCP VALIDATOR</option>
+      <option value="footprints-heatmap">FOOTPRINTS HEATMAP</option>
     </select>
     <button id="openToolPanelBtn" class="ml-2 px-2 py-1 text-sm rounded bg-blue-600 hover:bg-blue-700 text-white hidden">Open</button>
   </div>
@@ -438,10 +439,14 @@ const layerPhotos = L.layerGroup().addTo(map);
 const layerFlightArea = L.layerGroup().addTo(map);
 // Layer for validated Ground Control Points (GCPs)
 const layerGcp = L.layerGroup().addTo(map);
-const overlays = { "Streifen": layerStrips, "Fotopunkte": layerPhotos, "Flight area": layerFlightArea, "GCPs": layerGcp };
+// Layer for footprints / heatmap tiles
+const layerFootprints = L.layerGroup().addTo(map);
+const overlays = { "Streifen": layerStrips, "Fotopunkte": layerPhotos, "Flight area": layerFlightArea, "GCPs": layerGcp, "Footprints Heatmap": layerFootprints };
 L.control.layers({}, overlays, { collapsed:false }).addTo(map);
 // simple runtime session container (not persisted)
 window.__DRONE_SESSION = window.__DRONE_SESSION || {};
+// ensure flight images array exists
+window.__DRONE_SESSION['flight images'] = window.__DRONE_SESSION['flight images'] || [];
 
 // UI-Elemente
 const drawBtn = document.getElementById('drawPolygonBtn');
@@ -1207,8 +1212,11 @@ function exifxmp_init(maxTries = 20) {
     } else if (v === 'display-drone-flight') {
       openBtn.classList.remove('hidden');
       showPanel('display');
-    } else {
+    } else if (v === '') {
       openBtn.classList.add('hidden');
+      closeAllPanels();
+    } else {
+      // For other tools (gcp-validator, footprints-heatmap), close only EXIF/Display panels
       closeAllPanels();
     }
   });
@@ -1489,6 +1497,250 @@ if (document.readyState === 'complete' || document.readyState === 'interactive')
 
 })();
 
+// --- Footprints Heatmap: generation & UI handlers ---
+(function initFootprints() {
+  const toolSelect = document.getElementById('toolSelect');
+  const openBtn = document.getElementById('openToolPanelBtn');
+  const footprintsPanel = document.getElementById('footprintsPanel');
+  const footprintsClose = document.getElementById('footprintsClose');
+  const generateBtn = document.getElementById('generateFootprintsBtn');
+  const clearBtn = document.getElementById('clearFootprintsBtn');
+  const gridSelect = document.getElementById('footprintsGrid');
+  const defaultPixelInput = document.getElementById('footprintsDefaultPixelSize');
+  const resultsDiv = document.getElementById('footprintsResults');
+
+  if (!toolSelect || !openBtn || !footprintsPanel) {
+    if (document.readyState === 'complete' || document.readyState === 'interactive') {
+      console.warn('Footprints: essential elements not found; initialization skipped', {
+        toolSelect: !!toolSelect,
+        openBtn: !!openBtn,
+        footprintsPanel: !!footprintsPanel
+      });
+    } else {
+      document.addEventListener('DOMContentLoaded', initFootprints);
+    }
+    return;
+  }
+
+  console.log('Footprints panel initialized successfully');
+
+  function showFootprintsPanel() {
+    console.log('showFootprintsPanel called');
+    // hide other panels
+    const toolPanel = document.getElementById('toolPanel');
+    const displayPanel = document.getElementById('displayPanel');
+    const gcpPanel = document.getElementById('gcpPanel');
+    if (toolPanel) { toolPanel.classList.add('hidden'); toolPanel.style.display = 'none'; }
+    if (displayPanel) { displayPanel.classList.add('hidden'); displayPanel.style.display = 'none'; }
+    if (gcpPanel) { gcpPanel.classList.add('hidden'); gcpPanel.style.display = 'none'; }
+    footprintsPanel.classList.remove('hidden');
+    footprintsPanel.style.display = 'block';
+    console.log('Footprints panel should now be visible');
+    try { generateBtn && generateBtn.focus(); } catch {}
+  }
+  function closeFootprintsPanel() {
+    console.log('closeFootprintsPanel called');
+    footprintsPanel.classList.add('hidden');
+    footprintsPanel.style.display = 'none';
+  }
+
+  // show open button when footprints selected
+  toolSelect.addEventListener('change', (e) => {
+    if (e.target.value === 'footprints-heatmap') openBtn.classList.remove('hidden');
+    else {
+      // if toolSelect cleared, hide button
+      if (e.target.value === '') openBtn.classList.add('hidden');
+    }
+  });
+
+  openBtn.addEventListener('click', () => {
+    console.log('openBtn clicked, current tool:', toolSelect.value);
+    if (toolSelect.value === 'footprints-heatmap') {
+      console.log('Tool is footprints-heatmap, panel hidden?', footprintsPanel.classList.contains('hidden'));
+      if (footprintsPanel.classList.contains('hidden')) {
+        showFootprintsPanel();
+      } else {
+        closeFootprintsPanel();
+      }
+    }
+  });
+
+  if (footprintsClose) footprintsClose.addEventListener('click', () => { closeFootprintsPanel(); toolSelect.value = ''; openBtn.classList.add('hidden'); });
+
+  // small helpers
+  function metersToLatLngDelta(lat, dx, dy) {
+    const R = 6378137;
+    const dLat = (dy / R) * (180 / Math.PI);
+    const dLng = (dx / (R * Math.cos(lat * Math.PI / 180))) * (180 / Math.PI);
+    return [dLat, dLng];
+  }
+  function rotatePoint(x, y, angleRad) {
+    const cosA = Math.cos(angleRad), sinA = Math.sin(angleRad);
+    return [x * cosA - y * sinA, x * sinA + y * cosA];
+  }
+  function countToColor(count) {
+    const capped = Math.min(count, 5);
+    const t = (capped - 1) / 4;
+    let r,g,b;
+    if (t <= 0.5) {
+      const u = t / 0.5;
+      r = 255; g = Math.round(0 + u * (215 - 0)); b = 0;
+    } else {
+      const u = (t - 0.5) / 0.5;
+      r = Math.round(255 - u * (255 - 0));
+      g = Math.round(215 - u * (215 - 128));
+      b = 0;
+    }
+    return `rgba(${r},${g},${b},0.65)`;
+  }
+
+  async function generateHeatmap() {
+    resultsDiv.innerHTML = 'Preparing footprints...';
+    console.log('Session data:', window.__DRONE_SESSION);
+    console.log('Flight images in session:', window.__DRONE_SESSION && window.__DRONE_SESSION['flight images']);
+    const imgs = (window.__DRONE_SESSION && window.__DRONE_SESSION['flight images']) ? [...window.__DRONE_SESSION['flight images']] : [];
+    console.log('Images array for heatmap:', imgs.length, imgs);
+    if (!imgs || imgs.length === 0) {
+      resultsDiv.innerHTML = '<div class="warning">No flight images found in session. Run DISPLAY DRONE FLIGHT first.</div>';
+      return;
+    }
+
+    // compute heights
+    const needGround = [], needGroundIdx = [];
+    imgs.forEach((im, idx) => {
+      if (im.relAlt != null && isFinite(im.relAlt)) im._H = Number(im.relAlt);
+      else if (im.absAlt != null && isFinite(im.absAlt)) { needGround.push({ lat: im.lat, lng: im.lng }); needGroundIdx.push(idx); }
+      else im._H = null;
+    });
+
+    if (needGround.length > 0) {
+      resultsDiv.innerHTML = `Fetching ground elevation for ${needGround.length} images...`;
+      try {
+        const elevs = await window.fetchElevationsBatch(needGround);
+        needGroundIdx.forEach((imgIdx, k) => {
+          const ground = elevs[k] || 0;
+          const absA = imgs[imgIdx].absAlt || 0;
+          const H = absA - ground;
+          imgs[imgIdx]._H = isFinite(H) && H > 0 ? H : null;
+        });
+      } catch (e) {
+        console.warn('Failed to fetch ground elevations for footprints', e);
+        resultsDiv.innerHTML = `<div class="warning">Failed to fetch ground elevations: ${e.message}</div>`;
+        return;
+      }
+    }
+
+    const footprints = [], skipped = [], dbMatched = [], manualPixel = [];
+    const defaultPixel = parseFloat(defaultPixelInput && defaultPixelInput.value);
+    const useDefaultPixel = !isNaN(defaultPixel) && defaultPixel > 0;
+    
+    imgs.forEach((im) => {
+      let focal_mm = im.focal_mm;
+      let imgW = im.imgW;
+      let imgH = im.imgH;
+      let pixelSize_um = im.pixelSize_um;
+      const H = im._H;
+      
+      // Apply default pixel size if missing and user specified one
+      if ((!isFinite(pixelSize_um) || pixelSize_um === null) && useDefaultPixel) {
+        pixelSize_um = defaultPixel;
+        manualPixel.push(im.filename);
+      }
+      
+      // Track if this came from DB match
+      if (im.dbMatched) dbMatched.push(im.filename);
+      
+      if (!isFinite(focal_mm) || !imgW || !imgH || !isFinite(pixelSize_um) || !isFinite(H) || H <= 0) {
+        const reason = [];
+        if (!isFinite(focal_mm)) reason.push('no focal');
+        if (!imgW || !imgH) reason.push('no img size');
+        if (!isFinite(pixelSize_um)) reason.push('no pixel size');
+        if (!isFinite(H) || H <= 0) reason.push('no valid height');
+        skipped.push(`${im.filename || '(unnamed)'} (${reason.join(', ')})`);
+        return;
+      }
+      const sensorW_m = (pixelSize_um * 1e-6) * imgW;
+      const sensorH_m = (pixelSize_um * 1e-6) * imgH;
+      const focal_m = focal_mm / 1000;
+      const groundW = (sensorW_m / focal_m) * H;
+      const groundH = (sensorH_m / focal_m) * H;
+      const halfW = groundW / 2, halfH = groundH / 2;
+      const angle = (im.yaw != null && !isNaN(im.yaw)) ? (im.yaw * Math.PI / 180.0) : 0;
+      const cornersLocal = [
+        [-halfW, halfH],
+        [halfW, halfH],
+        [halfW, -halfH],
+        [-halfW, -halfH]
+      ].map(([x,y]) => { const [rx,ry] = rotatePoint(x,y,angle); return { x: rx, y: ry }; });
+      const lat = im.lat, lng = im.lng;
+      const latlngs = cornersLocal.map(c => {
+        const [dLat,dLng] = metersToLatLngDelta(lat, c.x, c.y); return [lat + dLat, lng + dLng];
+      });
+      // Close the polygon ring by adding first point at end
+      const ring = latlngs.map(ll=>[ll[1],ll[0]]);
+      ring.push(ring[0]); // close the ring
+      footprints.push({ filename: im.filename, polygon: turf.polygon([ring]), latlngs });
+    });
+
+    if (footprints.length === 0) {
+      resultsDiv.innerHTML = `<div class="warning">No valid footprints could be generated. Skipped ${skipped.length} images.</div>`;
+      return;
+    }
+
+    resultsDiv.innerHTML = `Generated ${footprints.length} footprints. Building heatmap grid...`;
+
+    let allCoords = [];
+    footprints.forEach(fp => fp.latlngs.forEach(ll => allCoords.push([ll[0], ll[1]])));
+    const lats = allCoords.map(c => c[0]), lngs = allCoords.map(c => c[1]);
+    const minLat = Math.min(...lats), maxLat = Math.max(...lats);
+    const minLng = Math.min(...lngs), maxLng = Math.max(...lngs);
+
+    const gridSize = parseInt(gridSelect.value, 10) || 120;
+    const rows = gridSize, cols = gridSize;
+    const latStep = (maxLat - minLat) / rows;
+    const lngStep = (maxLng - minLng) / cols;
+
+    if (typeof layerFootprints !== 'undefined' && layerFootprints.clearLayers) layerFootprints.clearLayers();
+
+    let cellCount = 0;
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const cellMinLat = minLat + r * latStep;
+        const cellMinLng = minLng + c * lngStep;
+        const cellCenter = [cellMinLat + latStep / 2, cellMinLng + lngStep / 2];
+        let count = 0;
+        for (let k = 0; k < footprints.length; k++) {
+          const poly = footprints[k].polygon;
+          if (turf.booleanPointInPolygon(turf.point([cellCenter[1], cellCenter[0]]), poly)) count++;
+        }
+        if (count > 0) {
+          const sw = [cellMinLat, cellMinLng];
+          const ne = [cellMinLat + latStep, cellMinLng + lngStep];
+          const color = countToColor(count);
+          const rect = L.rectangle([sw, ne], { stroke: false, fillColor: color, fillOpacity: 0.65, interactive: false });
+          rect.addTo(layerFootprints);
+          cellCount++;
+        }
+      }
+    }
+
+    let summaryParts = [`Heatmap rendered with ${cellCount} colored cells from ${footprints.length} footprints.`];
+    if (dbMatched.length) summaryParts.push(`DB matched: ${dbMatched.length}`);
+    if (manualPixel.length) summaryParts.push(`Manual pixel size: ${manualPixel.length}`);
+    if (skipped.length) summaryParts.push(`Skipped: ${skipped.length}`);
+    resultsDiv.innerHTML = summaryParts.join('<br>');
+    if (skipped.length) {
+      resultsDiv.innerHTML += '<details class="mt-2 text-xs"><summary>Show skipped images</summary><div class="mt-1 max-h-32 overflow-auto">' + skipped.join('<br>') + '</div></details>';
+    }
+
+    try { const leafletGroup = L.featureGroup(footprints.map(f=>L.polygon(f.latlngs))); map.fitBounds(leafletGroup.getBounds().pad(0.1)); } catch (e) { console.warn('fitBounds for footprints failed', e); }
+  }
+
+  generateBtn && generateBtn.addEventListener('click', async () => { await generateHeatmap(); });
+  clearBtn && clearBtn.addEventListener('click', () => { if (typeof layerFootprints !== 'undefined' && layerFootprints.clearLayers) layerFootprints.clearLayers(); resultsDiv.innerHTML = 'Cleared footprints/heatmap.'; });
+
+})();
+ 
 // Helper: robustly extract embedded XMP packet from a JPEG ArrayBuffer by searching byte sequences
 function extractXmpFromArrayBuffer(ab) {
   try {
@@ -1591,6 +1843,35 @@ function extractXmpFromArrayBuffer(ab) {
       <button id="gcpValidateBtn" class="ml-auto px-3 py-1 rounded border text-sm">Validate GCP</button>
     </div>
     <div id="gcpResults" class="output bg-gray-50 dark:bg-gray-800 p-2 rounded text-sm"></div>
+  </div>
+</aside>
+
+<!-- Footprints Heatmap Panel (right) -->
+<aside id="footprintsPanel" class="fixed top-[56px] right-0 bottom-0 w-[420px] bg-white dark:bg-gray-900 border-l border-gray-200 dark:border-gray-700 shadow-xl hidden z-[2000]">
+  <div class="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-700">
+    <h3 class="text-base font-semibold text-gray-800 dark:text-gray-100">FOOTPRINTS HEATMAP</h3>
+    <button id="footprintsClose" class="px-2 py-1 text-sm rounded bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-200">Close</button>
+  </div>
+  <div class="p-4 overflow-y-auto h-full">
+    <div class="text-sm mb-2">Generate image footprints (assumes nadir). Images missing required camera info (focal, pixel size, image dimensions) are skipped and reported.</div>
+    <div class="mb-2">
+      <label class="text-sm block mb-1">Default pixel size [µm] (for images without EXIF/DB match):</label>
+      <input type="number" id="footprintsDefaultPixelSize" placeholder="e.g. 2.4" step="0.1" min="0.1" class="w-full text-sm px-2 py-1 border rounded" />
+      <div class="text-xs text-gray-500 mt-1">Leave empty to skip unmatched images</div>
+    </div>
+    <div class="flex items-center space-x-2 mb-2">
+      <label class="text-sm">Grid resolution:</label>
+      <select id="footprintsGrid" class="ml-auto text-sm px-2 py-1 border rounded">
+        <option value="80">Low (80x80)</option>
+        <option value="120" selected>Default (120x120)</option>
+        <option value="180">High (180x180)</option>
+      </select>
+    </div>
+    <div class="flex space-x-2 mb-2">
+      <button id="generateFootprintsBtn" class="px-3 py-1 rounded border">Generate Footprint Heatmap</button>
+      <button id="clearFootprintsBtn" class="px-3 py-1 rounded border">Clear Footprints</button>
+    </div>
+    <div id="footprintsResults" class="output bg-gray-50 dark:bg-gray-800 p-2 rounded text-sm"></div>
   </div>
 </aside>
 
@@ -1719,6 +2000,65 @@ function extractXmpFromArrayBuffer(ab) {
             };
             parsedPoints.push(point);
             allPhotoPoints.push(point);
+
+            // Collect camera information for footprints tool in runtime session
+            try {
+              const focal_mm_raw = mapped.focal || metadata.FocalLength || metadata.FocalLengthIn35mmFormat || null;
+              const focal_mm = focal_mm_raw !== null ? Number(focal_mm_raw) : null;
+              const imgW = metadata.ExifImageWidth || metadata.PixelXDimension || metadata.imageWidth || null;
+              const imgH = metadata.ExifImageHeight || metadata.PixelYDimension || metadata.imageHeight || null;
+              const relAltVal = isFinite(relAlt) ? Number(relAlt) : null;
+              const absAltVal = isFinite(absAlt) ? Number(absAlt) : null;
+              const yawVal = mapped.flightDir ? Number(mapped.flightDir) : null;
+
+              // Try to get pixel size from EXIF/XMP first
+              let pixelSize_um = null;
+              if (parsedDict) {
+                pixelSize_um = parsedDict['PixelSize'] || parsedDict['pixelSize'] || parsedDict['pixel_size'] || parsedDict['PixelSizeUm'] || parsedDict['PixelSize_µm'] || parsedDict['pixelSize_um'] || null;
+              }
+              if (!pixelSize_um && metadata) {
+                pixelSize_um = metadata.PixelSize || metadata['PixelSize'] || null;
+              }
+              
+              // If no pixel size in EXIF/XMP, try to match against DRONE_DATABASE by model tag
+              let dbMatchedDrone = null;
+              if (!pixelSize_um) {
+                const exifModel = mapped.model || metadata.Model || metadata.Make || null;
+                if (exifModel) {
+                  for (const droneName in DRONE_DATABASE) {
+                    const d = DRONE_DATABASE[droneName];
+                    if (d.modelTag && exifModel.toString().includes(d.modelTag)) {
+                      pixelSize_um = d.pixelSize_um;
+                      dbMatchedDrone = droneName;
+                      break;
+                    }
+                  }
+                }
+              }
+              
+              if (pixelSize_um !== null) {
+                pixelSize_um = Number(pixelSize_um);
+              }
+
+              const flightImage = {
+                filename: file.name,
+                lat: lat,
+                lng: lon,
+                focal_mm: !isNaN(focal_mm) ? focal_mm : null,
+                imgW: imgW ? Number(imgW) : null,
+                imgH: imgH ? Number(imgH) : null,
+                relAlt: relAltVal,
+                absAlt: absAltVal,
+                yaw: !isNaN(yawVal) ? yawVal : null,
+                pixelSize_um: !isNaN(pixelSize_um) ? pixelSize_um : null,
+                dbMatched: dbMatchedDrone
+              };
+              window.__DRONE_SESSION['flight images'].push(flightImage);
+              console.log('Added flight image to session:', file.name, flightImage);
+            } catch (sessErr) {
+              console.warn('Failed to push flight image info into session for', file.name, sessErr);
+            }
+
           } catch (mapErr) {
             console.warn('Failed to add marker for', file.name, mapErr);
             skipped.push({ name: file.name, reason: 'map-error' });

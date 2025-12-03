@@ -11,6 +11,8 @@ Drone Planner is a browser-based application for creating and managing drone fli
 - Elevation data integration from Open Elevation API
 - EXIF+XMP READER tool for detailed metadata inspection of single JPG images (including GPS, altitude, attitude, camera and RTK/XMP tags)
 - DISPLAY DRONE FLIGHT tool for folder-based JPG import and flight visualization (blue photo markers, skipped-image log, summary integration)
+- Automatic calculation and drawing of a "flight area" polygon (yellow) from imported images; stored in runtime session for validation tools
+- GCP VALIDATOR tool: preview CSV, validate GCP coordinates against the flight area polygon, and visualize validated GCPs on the map
 - Export options (CSV, JSON, KML with elevation)
 - Photo point filtering for streamlined missions
 - Multilingual UI (English/German)
@@ -53,9 +55,9 @@ A dedicated tool for inspecting the metadata of a **single JPG image**:
 - Intended primarily for debugging and understanding how a specific image was captured.
 
 ### DISPLAY DRONE FLIGHT
-
+ 
 A separate tool for visualizing a **complete drone flight** from a folder of JPGs:
-
+ 
 - Opens via the top **Tools** dropdown as "DISPLAY DRONE FLIGHT".
 - Accepts a folder or multi-selection of JPG/JPEG images and:
   - Filters to top-level JPG/JPEG files (subfolders are ignored).
@@ -70,6 +72,39 @@ A separate tool for visualizing a **complete drone flight** from a folder of JPG
   - Bounded concurrency
   - Batched parsing with brief yields between batches
   - A configurable hard cap on the maximum number of imported images
+ 
+### GCP VALIDATOR
+ 
+A tool for importing and validating ground control points (GCPs) in CSV format:
+ 
+- Opens via the top **Tools** dropdown as "GCP VALIDATOR".
+- Workflow:
+  1. Select a `.csv` file using the file picker (expected header: `pointID,latitude,longitude,elevation,description` — case-insensitive).
+  2. The tool shows a live preview table of the CSV (all rows) in the right-side panel with vertical and horizontal scrollbars so the panel size does not change.
+  3. Optionally toggle "Swap latitude/longitude" to flip coordinates for all rows before validation.
+  4. Click "Validate GCP" to run validation.
+- Validation:
+  - Uses the runtime-calculated "flight area" polygon (created by DISPLAY DRONE FLIGHT or by drawing a polygon manually) to test whether each GCP falls inside the survey boundary.
+  - Uses Turf.js (client-side) boolean point-in-polygon checks.
+  - Reports counts: valid points, points outside the flight area, and rows with invalid format.
+- Visualization:
+  - Valid GCPs are drawn on the map as purple triangle markers (distinct layer "GCPs") and can be toggled in the map layer control.
+  - Invalid or outside points are not drawn by default but are listed in the validation results.
+- Notes:
+  - The flight-area polygon is stored in memory at `window.__DRONE_SESSION['flight area']` (runtime-only; not persisted across page reloads).
+  - All CSV parsing and spatial checks run entirely client-side and are compatible with static hosting (GitHub Pages).
+  
+### Sample GCP CSV
+
+Example valid CSV file (header required: `pointID,latitude,longitude,elevation,description`):
+
+```csv
+pointID,latitude,longitude,elevation,description
+GCP01,48.137148,11.576034,245.3,"Corner northeast"
+GCP02,48.136540,11.574900,244.8,"Corner southeast"
+GCP03,48.136900,11.575500,245.0,"Center point"
+```
+
 
 ## Elevation integration details
 - Batch requests to Open Elevation API endpoint `https://api.open-elevation.com/api/v1/lookup` (POST JSON: { locations: [{latitude, longitude}, ...] }).
