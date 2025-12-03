@@ -13,6 +13,7 @@ Drone Planner is a browser-based application for creating and managing drone fli
 - DISPLAY DRONE FLIGHT tool for folder-based JPG import and flight visualization (blue photo markers, skipped-image log, summary integration)
 - Automatic calculation and drawing of a "flight area" polygon (yellow) from imported images; stored in runtime session for validation tools
 - GCP VALIDATOR tool: preview CSV, validate GCP coordinates against the flight area polygon, and visualize validated GCPs on the map
+- FOOTPRINTS HEATMAP tool: computes per-image ground footprints (rotated by yaw when available), aggregates overlap into a grid heatmap, and visualizes coverage intensity
 - Export options (CSV, JSON, KML with elevation)
 - Photo point filtering for streamlined missions
 - Multilingual UI (English/German)
@@ -26,8 +27,8 @@ Drone Planner is a browser-based application for creating and managing drone fli
 - shapefile.js for shapefile import
 
 ## File Layout
-- `index.html` — main application single-file SPA
-- `README.md` — this documentation
+- [`index.html`](index.html:1) — main application single-file SPA
+- [`README.md`](README.md:1) — this documentation
 - shapefile and sample data files in repo root
 
 ## How it works
@@ -72,7 +73,9 @@ A separate tool for visualizing a **complete drone flight** from a folder of JPG
   - Bounded concurrency
   - Batched parsing with brief yields between batches
   - A configurable hard cap on the maximum number of imported images
- 
+
+- When images are imported, the app automatically computes a "flight area" polygon from the image extents and stores it in memory at [`window.__DRONE_SESSION['flight area']`](index.html:1651). The polygon is drawn in a distinct yellow layer (`layerFlightArea`) so it can be visually separated from photo points and strips.
+
 ### GCP VALIDATOR
  
 A tool for importing and validating ground control points (GCPs) in CSV format:
@@ -88,10 +91,10 @@ A tool for importing and validating ground control points (GCPs) in CSV format:
   - Uses Turf.js (client-side) boolean point-in-polygon checks.
   - Reports counts: valid points, points outside the flight area, and rows with invalid format.
 - Visualization:
-  - Valid GCPs are drawn on the map as purple triangle markers (distinct layer "GCPs") and can be toggled in the map layer control.
+  - Valid GCPs are drawn on the map as purple triangle markers on the separate "GCPs" layer and can be toggled in the map layer control.
   - Invalid or outside points are not drawn by default but are listed in the validation results.
 - Notes:
-  - The flight-area polygon is stored in memory at `window.__DRONE_SESSION['flight area']` (runtime-only; not persisted across page reloads).
+  - The flight-area polygon is stored in runtime memory at [`window.__DRONE_SESSION['flight area']`](index.html:1651) and is not persisted across page reloads.
   - All CSV parsing and spatial checks run entirely client-side and are compatible with static hosting (GitHub Pages).
   
 ### Sample GCP CSV
@@ -105,6 +108,30 @@ GCP02,48.136540,11.574900,244.8,"Corner southeast"
 GCP03,48.136900,11.575500,245.0,"Center point"
 ```
 
+## FOOTPRINTS HEATMAP
+
+A tool to visualize image coverage intensity by computing per-image ground footprints and aggregating overlaps into a grid-based heatmap:
+
+- Opens via the top **Tools** dropdown as "FOOTPRINTS HEATMAP".
+- What it does:
+  - For each imported image (stored in [`window.__DRONE_SESSION['flight images']`](index.html:1651)), the tool computes a ground footprint assuming a pinhole camera model:
+    - Uses image metadata: focal length (`focal_mm`), sensor size (derived from `pixelSize_um` and image pixel dimensions `imgW`, `imgH`).
+    - Uses flight height: prefers relative altitude (`relAlt`) when available; otherwise computes height from absolute altitude (`absAlt`) minus ground elevation fetched from [`src/elevation.js`](src/elevation.js:1).
+    - Rotates footprint corners by image yaw when yaw is available to align with flight direction.
+  - If a required camera property is missing (for example `pixelSize_um`), the tool tries the following fallbacks in order:
+    1. Use pixel size parsed from the image EXIF/XMP.
+    2. Match camera model against the internal DRONE_DATABASE to use its known pixel size (automatic DB match).
+    3. Use a user-provided "Default pixel size [µm]" value in the FOOTPRINTS panel.
+    4. If none are available, the image is skipped and reported in the generation summary.
+  - Builds a bounding box for all footprints, divides it into a grid (selectable resolution), and counts how many footprints cover each grid cell (center-based test).
+  - Renders grid cells as semi-transparent Leaflet rectangles colored by coverage count (gradient red → yellow → green).
+- Visualization and controls:
+  - The FOOTPRINTS panel shows controls for grid resolution and default pixel size (µm), a "Generate" button and a "Clear" button.
+  - The heatmap is added to a dedicated layer (`layerFootprints`) that can be toggled in the map layer control.
+- Notes:
+  - The current aggregation method tests the center point of each grid cell for inclusion in each image footprint polygon. A future option may add polygon intersection-area aggregation for more accurate coverage area weighting.
+  - Polygons are created using Turf.js; each polygon ring is explicitly closed before creating the Turf polygon to avoid ring errors.
+  - Per-image metadata used for footprints is stored in runtime memory at [`window.__DRONE_SESSION['flight images']`](index.html:1651).
 
 ## Elevation integration details
 - Batch requests to Open Elevation API endpoint `https://api.open-elevation.com/api/v1/lookup` (POST JSON: { locations: [{latitude, longitude}, ...] }).
@@ -138,6 +165,14 @@ window.stripElevations = {
   ...
 }
 ```
+- Runtime session storage:
+```javascript
+// Stored in memory while the page is open:
+window.__DRONE_SESSION = {
+  'flight area': GeoJSON Feature,        // polygon computed from image extents or manually drawn polygon
+  'flight images': [ { filename, lat, lng, focal_mm, imgW, imgH, relAlt, absAlt, yaw, pixelSize_um, dbMatched }, ... ]
+}
+```
 
 ## Development guidelines
 - Keep code documented with inline comments when adding features.
@@ -149,6 +184,7 @@ window.stripElevations = {
 - If KML shows features clamped to ground in Google Earth: ensure `<altitudeMode>absolute</altitudeMode>` is present and KML is opened with 3D terrain enabled.
 - If elevations are missing: check console logs for Open Elevation request/response, and check network (CORS) restrictions.
 - If the loading indicator causes errors: ensure `#loadingElevation` exists in the DOM; the app creates it programmatically if missing.
+- If you encounter Turf polygon ring errors ("First and last Position are not equivalent"): ensure your imported images include required camera metadata or provide a default pixel size in the FOOTPRINTS panel.
 
 ## Testing checklist
 - [ ] Draw polygon and calculate strips
@@ -156,6 +192,9 @@ window.stripElevations = {
 - [ ] Confirm elevations returned and `absoluteAltitude` set
 - [ ] Export KML and open in Google Earth; verify photo points and strips at expected altitude
 - [ ] Test KML with filters applied (filteredPhotoPoints)
+- [ ] Import images using DISPLAY DRONE FLIGHT and verify `flight area` polygon and `flight images` session entries exist
+- [ ] Use GCP VALIDATOR with `ground control points.csv` to validate GCPs against the flight area
+- [ ] Use FOOTPRINTS HEATMAP Generate to render coverage heatmap and verify colors align with expected overlap
 
 ## Future improvements
 - Split JS into modules for maintainability
